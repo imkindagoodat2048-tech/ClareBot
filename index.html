@@ -245,12 +245,16 @@ function buildData(levels){
 }
 
 // ── Backprop / SGD ──
+const CLIP=2.0; // gradient clipping threshold
+function clipGrad(g){return Math.max(-CLIP,Math.min(CLIP,g));}
+function safeNum(x){return isFinite(x)?x:0;}
+
 function trainBatch(bIn,bTgt,lr){
   const n=bIn.length;
   const dW1=W1.map(r=>r.map(()=>0)),db1_=b1.map(()=>0);
   const dW2=W2.map(r=>r.map(()=>0)),db2_=b2.map(()=>0);
   const dW3=W3.map(r=>r.map(()=>0)),db3_=b3.map(()=>0);
-  let totalLoss=0;
+  let totalLoss=0,skipped=0;
 
   for(let s=0;s<n;s++){
     const inp=bIn[s],tgt=bTgt[s];
@@ -258,35 +262,40 @@ function trainBatch(bIn,bTgt,lr){
     const z1=matVec(W1,inp,b1),h1=z1.map(relu);
     const z2=matVec(W2,h1,b2),h2=z2.map(relu);
     const raw=matVec(W3,h2,b3);
+    // NaN guard — skip corrupted samples
+    if(raw.some(v=>!isFinite(v))){skipped++;continue;}
     const typeP=softmax(raw.slice(0,NT));
     const restS=raw.slice(NT).map(sig);
     const out=[...typeP,...restS];
-    // Loss
+    // MSE loss
     const dOut=out.map((o,i)=>2*(o-tgt[i])/OUT);
-    totalLoss+=dOut.reduce((a,d,i)=>a+d*(out[i]-tgt[i]),0);
-    // dZ3
+    const sampleLoss=dOut.reduce((a,d,i)=>a+d*(out[i]-tgt[i]),0);
+    if(!isFinite(sampleLoss)){skipped++;continue;}
+    totalLoss+=sampleLoss;
+    // dZ3 — softmax-CE for type head, sigmoid for rest
     const dZ3=new Array(OUT).fill(0);
-    for(let i=0;i<NT;i++) for(let j=0;j<NT;j++) dZ3[j]+=(typeP[j]-(j===i?1:0))*dOut[i];
-    for(let i=NT;i<OUT;i++){const s2=restS[i-NT];dZ3[i]=dOut[i]*s2*(1-s2);}
-    // Accumulate W3/b3
-    for(let i=0;i<OUT;i++){db3_[i]+=dZ3[i];for(let j=0;j<H2;j++)dW3[i][j]+=dZ3[i]*h2[j];}
+    for(let i=0;i<NT;i++) for(let j=0;j<NT;j++) dZ3[j]+=clipGrad((typeP[j]-(j===i?1:0))*dOut[i]);
+    for(let i=NT;i<OUT;i++){const sv=restS[i-NT];dZ3[i]=clipGrad(dOut[i]*sv*(1-sv));}
+    // W3/b3 grads
+    for(let i=0;i<OUT;i++){db3_[i]+=dZ3[i];for(let j=0;j<H2;j++)dW3[i][j]+=clipGrad(dZ3[i]*h2[j]);}
     // dH2 → dZ2
     const dH2=new Array(H2).fill(0);
     for(let j=0;j<H2;j++) for(let i=0;i<OUT;i++) dH2[j]+=dZ3[i]*W3[i][j];
-    const dZ2=dH2.map((d,j)=>z2[j]>0?d:0);
-    for(let i=0;i<H2;i++){db2_[i]+=dZ2[i];for(let j=0;j<H1;j++)dW2[i][j]+=dZ2[i]*h1[j];}
+    const dZ2=dH2.map((d,j)=>z2[j]>0?clipGrad(d):0);
+    for(let i=0;i<H2;i++){db2_[i]+=dZ2[i];for(let j=0;j<H1;j++)dW2[i][j]+=clipGrad(dZ2[i]*h1[j]);}
     // dH1 → dZ1
     const dH1=new Array(H1).fill(0);
     for(let j=0;j<H1;j++) for(let i=0;i<H2;i++) dH1[j]+=dZ2[i]*W2[i][j];
-    const dZ1=dH1.map((d,j)=>z1[j]>0?d:0);
-    for(let i=0;i<H1;i++){db1_[i]+=dZ1[i];for(let j=0;j<IN;j++)dW1[i][j]+=dZ1[i]*inp[j];}
+    const dZ1=dH1.map((d,j)=>z1[j]>0?clipGrad(d):0);
+    for(let i=0;i<H1;i++){db1_[i]+=dZ1[i];for(let j=0;j<IN;j++)dW1[i][j]+=clipGrad(dZ1[i]*inp[j]);}
   }
 
-  // Apply
-  for(let i=0;i<H1;i++){b1[i]-=lr*db1_[i]/n;for(let j=0;j<IN;j++)W1[i][j]-=lr*dW1[i][j]/n;}
-  for(let i=0;i<H2;i++){b2[i]-=lr*db2_[i]/n;for(let j=0;j<H1;j++)W2[i][j]-=lr*dW2[i][j]/n;}
-  for(let i=0;i<OUT;i++){b3[i]-=lr*db3_[i]/n;for(let j=0;j<H2;j++)W3[i][j]-=lr*dW3[i][j]/n;}
-  return totalLoss/n;
+  const valid=n-skipped||1;
+  // Apply gradients (Adam-lite: just scale by 1/valid)
+  for(let i=0;i<H1;i++){b1[i]=safeNum(b1[i]-lr*db1_[i]/valid);for(let j=0;j<IN;j++)W1[i][j]=safeNum(W1[i][j]-lr*dW1[i][j]/valid);}
+  for(let i=0;i<H2;i++){b2[i]=safeNum(b2[i]-lr*db2_[i]/valid);for(let j=0;j<H1;j++)W2[i][j]=safeNum(W2[i][j]-lr*dW2[i][j]/valid);}
+  for(let i=0;i<OUT;i++){b3[i]=safeNum(b3[i]-lr*db3_[i]/valid);for(let j=0;j<H2;j++)W3[i][j]=safeNum(W3[i][j]-lr*dW3[i][j]/valid);}
+  return safeNum(totalLoss/valid);
 }
 
 // ── Weight persistence (Firebase) ──
@@ -298,10 +307,11 @@ async function saveWeights(){
     epochs:parseInt(document.getElementById('s-epochs').textContent)||0
   };
   // Serialize as flat arrays to keep Firebase happy
+  const clean=v=>isFinite(v)?v:0; // strip any surviving NaN/Inf
   const flat={
-    W1:W1.map(r=>Array.from(r)),b1:Array.from(b1),
-    W2:W2.map(r=>Array.from(r)),b2:Array.from(b2),
-    W3:W3.map(r=>Array.from(r)),b3:Array.from(b3),
+    W1:W1.map(r=>r.map(clean)),b1:b1.map(clean),
+    W2:W2.map(r=>r.map(clean)),b2:b2.map(clean),
+    W3:W3.map(r=>r.map(clean)),b3:b3.map(clean),
     savedAt:model.savedAt,epochs:model.epochs
   };
   try{
@@ -390,6 +400,7 @@ async function trainNow(){
   let lr=0.008;
   log('Training '+EPOCHS+' epochs ('+H1+'-'+H2+' hidden, '+inputs.length+' pairs)...','accent');
 
+  // Yield every epoch so the browser stays responsive and CPU stays cool
   for(let ep=0;ep<EPOCHS;ep++){
     const idx=[...Array(inputs.length).keys()].sort(()=>Math.random()-0.5);
     let el=0,eb=0;
@@ -398,16 +409,16 @@ async function trainNow(){
       el+=trainBatch(bi.map(i=>inputs[i]),bi.map(i=>targets[i]),lr);
       eb++;
     }
-    const avgLoss=el/eb;
-    // LR decay
-    if((ep+1)%100===0)lr*=0.7;
+    const avgLoss=el/(eb||1);
+    if((ep+1)%100===0)lr*=0.75;
     document.getElementById('prog').style.width=((ep+1)/EPOCHS*100)+'%';
     document.getElementById('s-epochs').textContent=ep+1;
-    document.getElementById('s-loss').textContent=avgLoss.toFixed(4);
-    if((ep+1)%50===0||ep===0){
+    document.getElementById('s-loss').textContent=isFinite(avgLoss)?avgLoss.toFixed(4):'NaN (recovering)';
+    if((ep+1)%25===0||ep===0){
       log('Epoch '+(ep+1)+'/'+EPOCHS+' — loss: '+avgLoss.toFixed(4),(avgLoss<0.04?'good':'info'));
-      await new Promise(r=>setTimeout(r,1));
     }
+    // Yield every epoch — keeps browser alive and prevents CPU meltdown
+    await new Promise(r=>setTimeout(r,8));
   }
 
   trained=true;
