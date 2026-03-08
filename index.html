@@ -467,6 +467,7 @@ function generateLevel(){
 
   const obs=[];
   obs.push({t:'startblock',x:80,y:GROUND_Y-40,w:40,h:40,touchable:true});
+  let textBlockCount=0;
 
   let curX=220;
   const maxX=4000;
@@ -513,9 +514,14 @@ function generateLevel(){
 
     // Text block: generate text content
     if(t==='textblock'){
-      obj.text=generateText(temp);
-      obj.textSize=Math.round(14+Math.random()*20);
-      obj.touchable=false;
+      if(textBlockCount>=3){
+        obj.t='block'; // limit reached — replace with plain block
+      } else {
+        obj.text=generateText(temp);
+        obj.textSize=Math.round(14+Math.random()*20);
+        obj.touchable=false;
+        textBlockCount++;
+      }
     }
 
     obs.push(obj);
