@@ -55,9 +55,10 @@ textarea{width:100%;background:#070710;border:1px solid #1e1e3a;color:#88aaff;fo
 
   <div class="panel" style="flex:1;">
     <h2>CONTROLS</h2>
-    <button class="btn" id="btn-train" onclick="trainNow()"> Train Now</button>
+    <button class="btn" id="btn-train" onclick="trainNow()">⚡ Train Now</button>
     <button class="btn green" id="btn-gen" onclick="generateLevel()" disabled>✦ Generate Level</button>
-    <button class="btn" onclick="saveToFirebase()" id="btn-save" disabled> Save to ClareDash</button>
+    <button class="btn" onclick="saveToFirebase()" id="btn-save" disabled>💾 Save to ClareDash</button>
+    <button class="btn" onclick="saveWeights()" style="background:#2a4a6a;">📡 Save Weights</button>
     <button class="btn red" onclick="document.getElementById('log').innerHTML=''">✕ Clear Log</button>
     <div style="margin-top:14px;font-size:10px;color:#445;display:flex;align-items:center;gap:8px;flex-wrap:wrap;">
       <span>Creativity:</span>
@@ -67,7 +68,7 @@ textarea{width:100%;background:#070710;border:1px solid #1e1e3a;color:#88aaff;fo
       <input type="range" min="8" max="80" value="28" id="len-slider" style="width:110px;" oninput="document.getElementById('len-val').textContent=this.value">
       <span id="len-val" style="color:#88aaff;width:24px;">28</span>
     </div>
-    <div style="margin-top:10px;font-size:9px;color:#2e4a3a;"> Auto-retrains every hour in background</div>
+    <div style="margin-top:10px;font-size:9px;color:#2e4a3a;">⏰ Auto-retrains every hour in background</div>
   </div>
 </div>
 
@@ -101,16 +102,26 @@ const db=firebase.database();
 const GROUND_Y=360;
 const BLOCK_TYPES=[
   'block','spike','orb','plat','solidblock','pad',
-  'gravityorb','negorb','coin','shipportal','waveportal',
-  'spiderportal','ballportal','trigger','glowblock'
+  'gravityorb','negorb','shipportal','waveportal',
+  'spiderportal','ballportal','trigger','glowblock',
+  'textblock','special'
 ];
-const NT=BLOCK_TYPES.length; // 15 type classes
+const NT=BLOCK_TYPES.length; // 16 type classes
+
+// Version ranges per type (max version, 1 = no version)
+const TYPE_MAX_VERSION={
+  block:5, spike:4, orb:5, special:11,
+};
+
+// Text corpus for textblock generation (learned from levels)
+let textCorpus=[]; // array of words seen in training
+let wordFreq={};   // word → count
 
 // ── Network dims ──
-// Input:  type_onehot(NT) + x_n + y_n + w_n + h_n + prev_type_onehot(NT) = NT*2+4
+// Input:  type_onehot(NT) + version_n + x_n + y_n + w_n + h_n + prev_type_onehot(NT) + prev_version_n = NT*2+6
 // Hidden: 96 → 48
-// Output: type_onehot(NT) + dx_n + dy_n + w_n + h_n = NT+4
-const IN=NT*2+4, H1=96, H2=48, OUT=NT+4;
+// Output: type_onehot(NT) + version_n + dx_n + dy_n + w_n + h_n = NT+5
+const IN=NT*2+6, H1=96, H2=48, OUT=NT+5;
 
 let W1,b1,W2,b2,W3,b3;
 let trained=false;
@@ -151,14 +162,18 @@ function forward(inp){
 // ── Encoding ──
 function oneHot(idx,n){const h=new Array(n).fill(0);h[Math.max(0,Math.min(idx,n-1))]=1;return h;}
 function typeIdx(t){const i=BLOCK_TYPES.indexOf(t);return i<0?0:i;}
+function versionNorm(o){return((o.version||1)-1)/10;} // 0..1 for versions 1-11
+
 function encodeSeq(cur,prev,prevPrev,maxX){
   return[
     ...oneHot(typeIdx(cur.t),NT),
+    versionNorm(cur),
     (cur.x||0)/maxX,
     Math.min((cur.y||0),GROUND_Y)/GROUND_Y,
     Math.min((cur.w||40),400)/400,
     Math.min((cur.h||40),400)/400,
-    ...oneHot(typeIdx(prev?prev.t:'block'),NT)
+    ...oneHot(typeIdx(prev?prev.t:'block'),NT),
+    prev?versionNorm(prev):0
   ];
 }
 function encodeTarget(cur,prev,maxX){
@@ -166,6 +181,7 @@ function encodeTarget(cur,prev,maxX){
   const dy=prev?(((cur.y||0)-(prev.y||0))+GROUND_Y)/(2*GROUND_Y):0.5;
   return[
     ...oneHot(typeIdx(cur.t),NT),
+    versionNorm(cur),
     Math.min(Math.max(dx,0),1),
     Math.min(Math.max(dy,0),1),
     Math.min((cur.w||40),400)/400,
@@ -173,12 +189,49 @@ function encodeTarget(cur,prev,maxX){
   ];
 }
 
+// ── Learn text from levels ──
+function learnText(levels){
+  wordFreq={};
+  for(const lv of levels){
+    for(const o of (lv.obs||[])){
+      if(o.t==='textblock'&&o.text){
+        o.text.split(/\s+/).forEach(w=>{
+          const wc=w.trim().toLowerCase();
+          if(wc.length>0) wordFreq[wc]=(wordFreq[wc]||0)+1;
+        });
+      }
+    }
+  }
+  // Build weighted corpus
+  textCorpus=[];
+  Object.entries(wordFreq).forEach(([w,n])=>{
+    for(let i=0;i<Math.min(n,5);i++) textCorpus.push(w);
+  });
+  if(!textCorpus.length) textCorpus=['hello','world','jump','dodge','run','go','nice','level','cool','wow'];
+  log('Text corpus: '+Object.keys(wordFreq).length+' unique words learned.','accent');
+}
+
+function generateText(temp){
+  // Pick 2-6 words from corpus with temperature-based randomness
+  const count=2+Math.floor(Math.random()*4);
+  const words=[];
+  for(let i=0;i<count;i++){
+    const idx=Math.floor(Math.random()*textCorpus.length);
+    words.push(textCorpus[idx]);
+  }
+  // Capitalize first word
+  if(words.length) words[0]=words[0][0].toUpperCase()+words[0].slice(1);
+  return words.join(' ');
+}
+
+
 // ── Build training data ──
 function buildData(levels){
   const inputs=[],targets=[];
+  learnText(levels);
   for(const lv of levels){
     const obs=(lv.obs||[])
-      .filter(o=>BLOCK_TYPES.includes(o.t))
+      .filter(o=>BLOCK_TYPES.includes(o.t)) // coin not in list → auto-filtered
       .sort((a,b)=>(a.x||0)-(b.x||0));
     if(obs.length<3)continue;
     const maxX=Math.max(...obs.map(o=>o.x||0),800);
@@ -236,7 +289,72 @@ function trainBatch(bIn,bTgt,lr){
   return totalLoss/n;
 }
 
-// ── Log helpers ──
+// ── Weight persistence (Firebase) ──
+async function saveWeights(){
+  log('Saving model weights to Firebase...','accent');
+  const model={
+    W1,b1,W2,b2,W3,b3,
+    savedAt:Date.now(),
+    epochs:parseInt(document.getElementById('s-epochs').textContent)||0
+  };
+  // Serialize as flat arrays to keep Firebase happy
+  const flat={
+    W1:W1.map(r=>Array.from(r)),b1:Array.from(b1),
+    W2:W2.map(r=>Array.from(r)),b2:Array.from(b2),
+    W3:W3.map(r=>Array.from(r)),b3:Array.from(b3),
+    savedAt:model.savedAt,epochs:model.epochs
+  };
+  try{
+    await db.ref('claredash_nn_weights').set(flat);
+    // Also save text corpus
+    if(Object.keys(wordFreq).length>0){
+      await db.ref('claredash_nn_text').set(wordFreq);
+    }
+    log('✓ Weights + text corpus saved to Firebase (shared with all users).','good');
+  }catch(e){
+    log('Failed to save weights: '+e.message,'warn');
+  }
+}
+
+async function loadWeights(){
+  log('Loading shared model weights from Firebase...','accent');
+  try{
+    const snap=await db.ref('claredash_nn_weights').once('value');
+    if(!snap.exists()){log('No saved weights found — starting fresh.','info');initWeights();return false;}
+    const d=snap.val();
+    W1=d.W1;b1=d.b1;
+    W2=d.W2;b2=d.b2;
+    W3=d.W3;b3=d.b3;
+    trained=true;
+    const savedDate=d.savedAt?new Date(d.savedAt).toLocaleString():'unknown';
+    document.getElementById('s-epochs').textContent=d.epochs||'?';
+    document.getElementById('s-time').textContent=new Date(d.savedAt||Date.now()).toLocaleTimeString();
+    document.getElementById('btn-gen').disabled=false;
+    // Also load text corpus
+    try{
+      const tsnap=await db.ref('claredash_nn_text').once('value');
+      if(tsnap.exists()){
+        wordFreq=tsnap.val();
+        textCorpus=[];
+        Object.entries(wordFreq).forEach(([w,n])=>{for(let i=0;i<Math.min(n,5);i++)textCorpus.push(w);});
+        log('✓ Text corpus loaded: '+Object.keys(wordFreq).length+' words.','good');
+      }
+    }catch(e){log('Text corpus load failed (non-critical): '+e.message,'info');}
+    log('✓ Loaded existing model (saved '+savedDate+', epochs: '+(d.epochs||'?')+').','good');
+    return true;
+  }catch(e){
+    log('Failed to load weights: '+e.message+' — starting fresh.','warn');
+    initWeights();return false;
+  }
+}
+
+// Debounced weight save (save at end of training, not mid-batch)
+let _saveTimer=null;
+function scheduleSave(){
+  if(_saveTimer)clearTimeout(_saveTimer);
+  _saveTimer=setTimeout(saveWeights,500);
+}
+
 function log(msg,cls='info'){
   const el=document.getElementById('log');
   const d=document.createElement('div');d.className=cls;
@@ -296,9 +414,11 @@ async function trainNow(){
   document.getElementById('s-time').textContent=new Date().toLocaleTimeString();
   document.getElementById('btn-gen').disabled=false;
   document.getElementById('btn-train').disabled=false;
-  document.getElementById('btn-train').textContent=' Train Now';
+  document.getElementById('btn-train').textContent='⚡ Train Now';
   log('✓ Training complete! Click "Generate Level" to create a level.','good');
   isTraining=false;
+  // Save updated weights so all users benefit
+  await saveWeights();
 }
 
 // ── Generation ──
@@ -327,28 +447,45 @@ function generateLevel(){
     const inp=encodeSeq(last,prev2,null,maxX);
     const out=forward(inp);
 
-    // Sample type
+    // Sample type - coins excluded from BLOCK_TYPES already
     let tProbs=tempSample(out.slice(0,NT),temp);
     // Reduce portal/trigger probability
     AVOID_PORTAL.forEach(t=>{const idx=typeIdx(t);tProbs[idx]*=0.15;});
-    // Re-normalize
     const tSum=tProbs.reduce((a,b)=>a+b,0);
     tProbs=tProbs.map(p=>p/tSum);
     const ti=pick(tProbs);
     const t=BLOCK_TYPES[ti];
 
-    // Decode position/size + noise scaled by temp
+    // Pick version for versioned types
+    const maxV=TYPE_MAX_VERSION[t]||1;
+    let version=1;
+    if(maxV>1){
+      const vRaw=out[NT]; // version neuron
+      version=Math.max(1,Math.min(maxV,Math.round(vRaw*(maxV-1)+1+randn(temp*maxV*0.3))));
+    }
+
+    // Decode position/size + noise
     const noise=()=>randn(temp*25);
-    const dx=Math.max(30,Math.min(600,out[NT]*500+80+noise()));
-    const dyRel=(out[NT+1]*2-1)*GROUND_Y*0.4+noise();
-    const wRaw=Math.max(20,Math.min(300,out[NT+2]*300+20+noise()));
-    const hRaw=Math.max(20,Math.min(200,out[NT+3]*200+20+noise()));
+    const dx=Math.max(30,Math.min(600,out[NT+1]*500+80+noise()));
+    const dyRel=(out[NT+2]*2-1)*GROUND_Y*0.4+noise();
+    const wRaw=Math.max(20,Math.min(300,out[NT+3]*300+20+noise()));
+    const hRaw=Math.max(20,Math.min(200,out[NT+4]*200+20+noise()));
 
     curX+=Math.round(dx);
     const baseY=last.y||GROUND_Y-40;
     const y=Math.min(GROUND_Y-hRaw,Math.max(0,Math.round(baseY+dyRel)));
 
-    obs.push({t,x:Math.round(curX),y:Math.round(y),w:Math.round(wRaw),h:Math.round(hRaw),touchable:true,alpha:0,color:null,bounce:50});
+    const obj={t,x:Math.round(curX),y:Math.round(y),w:Math.round(wRaw),h:Math.round(hRaw),
+      touchable:true,alpha:0,color:null,bounce:50,version:maxV>1?version:undefined};
+
+    // Text block: generate text content
+    if(t==='textblock'){
+      obj.text=generateText(temp);
+      obj.textSize=Math.round(14+Math.random()*20);
+      obj.touchable=false;
+    }
+
+    obs.push(obj);
   }
 
   obs.push({t:'endblock',x:curX+240,y:GROUND_Y-40,w:40,h:40,touchable:true});
@@ -389,9 +526,10 @@ function generateLevel(){
 const PREV_COLORS={
   block:'#2a2a5a',spike:'#dd3333',orb:'rgba(255,220,0,0.9)',
   plat:'#5555aa',solidblock:'#cccccc',pad:'#22cc77',
-  gravityorb:'#ff4444',negorb:'#8844ff',coin:'#f9ca24',
+  gravityorb:'#ff4444',negorb:'#8844ff',
   shipportal:'#ffcc00',waveportal:'#00ccff',spiderportal:'#cc44ff',
   ballportal:'#44ffaa',trigger:'#e8a000',glowblock:'#ff6688',
+  textblock:'rgba(255,255,255,0.06)',special:'rgba(200,200,255,0.85)',
   startblock:'rgba(46,213,115,0.5)',endblock:'rgba(232,255,0,0.5)'
 };
 
@@ -404,24 +542,38 @@ function renderPreview(obs){
   const ctx=canvas.getContext('2d');
 
   ctx.fillStyle='#1a1a2e';ctx.fillRect(0,0,canvas.width,canvas.height);
-  // Ground
   ctx.fillStyle='#252545';ctx.fillRect(0,GROUND_Y*SCALE,canvas.width,20);
 
   obs.forEach(o=>{
     const x=o.x||0,y=(o.y||0)*SCALE,w=o.w||40,h=(o.h||40)*SCALE;
     const col=PREV_COLORS[o.t]||'#888';
     ctx.fillStyle=col;
-    if(o.t==='orb'||o.t==='gravityorb'||o.t==='negorb'){
+
+    if(o.t==='textblock'){
+      ctx.strokeStyle='rgba(255,255,255,0.25)';ctx.lineWidth=1;
+      ctx.strokeRect(x,y,w,h);ctx.fillRect(x,y,w,h);
+      ctx.fillStyle='rgba(255,255,255,0.85)';
+      const fs=Math.max(6,Math.min(11,h*0.35));
+      ctx.font=fs+'px monospace';ctx.textAlign='center';
+      const txt=o.text||'';
+      ctx.fillText(txt.length>14?txt.slice(0,13)+'\u2026':txt,x+w/2,y+h/2+fs*0.35);
+    } else if(o.t==='special'){
       ctx.beginPath();ctx.arc(x+w/2,y+h/2,Math.min(w,h)/2,0,Math.PI*2);ctx.fill();
+      ctx.fillStyle='rgba(0,0,0,0.55)';ctx.font='6px monospace';ctx.textAlign='center';
+      ctx.fillText('sp'+(o.version||1),x+w/2,y+h/2+2);
+    } else if(o.t==='orb'||o.t==='gravityorb'||o.t==='negorb'){
+      ctx.beginPath();ctx.arc(x+w/2,y+h/2,Math.min(w,h)/2,0,Math.PI*2);ctx.fill();
+      if(o.version&&o.version>1){ctx.fillStyle='rgba(0,0,0,0.5)';ctx.font='6px monospace';ctx.textAlign='center';ctx.fillText('v'+o.version,x+w/2,y+h/2+2);}
     } else if(o.t==='spike'){
       ctx.beginPath();ctx.moveTo(x+w/2,y);ctx.lineTo(x+w,y+h);ctx.lineTo(x,y+h);ctx.closePath();ctx.fill();
+      if(o.version&&o.version>1){ctx.fillStyle='rgba(255,255,255,0.6)';ctx.font='6px monospace';ctx.textAlign='center';ctx.fillText('v'+o.version,x+w/2,y+h*0.75);}
     } else {
       ctx.fillRect(x,y,w,h);
+      ctx.fillStyle='rgba(255,255,255,0.4)';ctx.font='6px monospace';ctx.textAlign='center';
+      const sn=o.t.replace('block','').replace('portal','p').replace('solid','sol');
+      const lbl=o.version&&o.version>1?sn+' v'+o.version:sn;
+      ctx.fillText(lbl,x+w/2,y+h/2+2);
     }
-    // Mini label
-    ctx.fillStyle='rgba(255,255,255,0.4)';ctx.font='6px monospace';ctx.textAlign='center';
-    const shortName=o.t.replace('block','').replace('portal','p').replace('solid','sol');
-    ctx.fillText(shortName,x+w/2,y+h/2+2);
   });
 }
 
@@ -440,12 +592,15 @@ async function saveToFirebase(){
 }
 
 // ── Init ──
-initWeights();
-log('Network ready. Architecture: '+IN+'→'+H1+'→'+H2+'→'+OUT,'accent');
-log('Click Train Now to learn from all ClareDash levels.','info');
+initWeights(); // set default structure in case load fails
+log('Network architecture: '+IN+'→'+H1+'→'+H2+'→'+OUT,'accent');
+log('Loading shared model from Firebase...','info');
+loadWeights().then(loaded=>{
+  if(!loaded) log('No prior training found. Click ⚡ Train Now to begin.','info');
+});
 
 // Auto-retrain every hour
-setInterval(()=>{log('AUTO-TRAIN START','accent');trainNow();},60*60*1000);
+setInterval(()=>{log('⏰ Hourly auto-retrain starting...','accent');trainNow();},60*60*1000);
 </script>
 </body>
 </html>
