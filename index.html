@@ -318,7 +318,8 @@ async function saveWeights(){
     await db.ref('claredash_nn_weights').set(flat);
     // Also save text corpus
     if(Object.keys(wordFreq).length>0){
-      await db.ref('claredash_nn_text').set(wordFreq);
+      // Store as JSON string to avoid Firebase key character restrictions
+      await db.ref('claredash_nn_text').set({corpus:JSON.stringify(wordFreq)});
     }
     log('✓ Weights + text corpus saved to Firebase (shared with all users).','good');
   }catch(e){
@@ -332,9 +333,27 @@ async function loadWeights(){
     const snap=await db.ref('claredash_nn_weights').once('value');
     if(!snap.exists()){log('No saved weights found — starting fresh.','info');initWeights();return false;}
     const d=snap.val();
+    // Shape validation — if architecture changed, saved weights are incompatible
+    const shapeOk = d.W1&&d.W1.length===H1&&d.W1[0]&&d.W1[0].length===IN
+                 && d.W2&&d.W2.length===H2&&d.W2[0]&&d.W2[0].length===H1
+                 && d.W3&&d.W3.length===OUT&&d.W3[0]&&d.W3[0].length===H2
+                 && d.b1&&d.b1.length===H1
+                 && d.b2&&d.b2.length===H2
+                 && d.b3&&d.b3.length===OUT;
+    if(!shapeOk){
+      log('Saved weights have wrong shape (architecture changed) — starting fresh and clearing old weights.','warn');
+      initWeights();
+      // Wipe the stale weights so next save stores the correct shape
+      await db.ref('claredash_nn_weights').remove();
+      return false;
+    }
     W1=d.W1;b1=d.b1;
     W2=d.W2;b2=d.b2;
     W3=d.W3;b3=d.b3;
+    // Sanitize loaded weights just in case
+    const cl=v=>isFinite(v)?v:0;
+    W1=W1.map(r=>r.map(cl));W2=W2.map(r=>r.map(cl));W3=W3.map(r=>r.map(cl));
+    b1=b1.map(cl);b2=b2.map(cl);b3=b3.map(cl);
     trained=true;
     const savedDate=d.savedAt?new Date(d.savedAt).toLocaleString():'unknown';
     document.getElementById('s-epochs').textContent=d.epochs||'?';
@@ -344,7 +363,8 @@ async function loadWeights(){
     try{
       const tsnap=await db.ref('claredash_nn_text').once('value');
       if(tsnap.exists()){
-        wordFreq=tsnap.val();
+        const raw=tsnap.val();
+        wordFreq=raw.corpus?JSON.parse(raw.corpus):raw;
         textCorpus=[];
         Object.entries(wordFreq).forEach(([w,n])=>{for(let i=0;i<Math.min(n,5);i++)textCorpus.push(w);});
         log('✓ Text corpus loaded: '+Object.keys(wordFreq).length+' words.','good');
