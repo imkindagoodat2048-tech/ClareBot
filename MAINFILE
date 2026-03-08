@@ -1,0 +1,451 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>ClareDash NN</title>
+<script src="https://www.gstatic.com/firebasejs/9.17.1/firebase-app-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/9.17.1/firebase-database-compat.js"></script>
+<style>
+*{box-sizing:border-box;margin:0;padding:0;}
+body{background:#0a0a14;color:#ccc;font-family:'Courier New',monospace;padding:24px;min-height:100vh;}
+h1{font-size:20px;color:#88aaff;letter-spacing:3px;margin-bottom:2px;}
+.sub{font-size:10px;color:#333;letter-spacing:2px;margin-bottom:22px;}
+.row{display:flex;gap:16px;flex-wrap:wrap;}
+.panel{background:#0f0f1a;border:1px solid #1e1e3a;border-radius:8px;padding:16px;flex:1;min-width:280px;margin-bottom:16px;}
+.panel h2{font-size:11px;letter-spacing:2px;color:#88aaff;margin-bottom:12px;border-bottom:1px solid #1e1e3a;padding-bottom:6px;}
+.log{height:220px;overflow-y:auto;font-size:10px;line-height:1.7;}
+.log .info{color:#556;}
+.log .good{color:#2ed573;}
+.log .warn{color:#ffa502;}
+.log .accent{color:#88aaff;}
+.log .gen{color:#f9ca24;}
+.btn{background:#4834d4;border:none;color:#fff;padding:9px 20px;border-radius:5px;cursor:pointer;font-size:12px;font-family:'Courier New',monospace;letter-spacing:1px;margin-right:8px;margin-bottom:8px;transition:opacity .15s;}
+.btn:hover{opacity:.8;}
+.btn.green{background:#2e7a4a;}
+.btn.red{background:#eb4d4b;}
+.btn:disabled{background:#222;color:#444;cursor:not-allowed;opacity:1;}
+.stat{display:flex;justify-content:space-between;font-size:10px;padding:3px 0;border-bottom:1px solid #111;}
+.stat span{color:#88aaff;}
+#canvas-wrap{width:100%;overflow-x:auto;}
+canvas{display:block;background:#1a1a2e;border:1px solid #2a2a5a;border-radius:4px;}
+.progress-bar{height:6px;background:#1e1e3a;border-radius:3px;margin:8px 0;}
+.progress-fill{height:100%;border-radius:3px;background:#4834d4;transition:width .2s;}
+textarea{width:100%;background:#070710;border:1px solid #1e1e3a;color:#88aaff;font-family:'Courier New',monospace;font-size:9px;padding:8px;border-radius:4px;resize:vertical;height:100px;}
+</style>
+</head>
+<body>
+
+<h1>CLAREDASH NEURAL NETWORK</h1>
+<div class="sub">LEVEL GENERATION ENGINE — learns from all existing levels, generates on demand</div>
+
+<div class="row">
+  <div class="panel" style="min-width:220px;max-width:250px;flex:0 0 220px;">
+    <h2>STATUS</h2>
+    <div class="stat">Levels learned <span id="s-levels">0</span></div>
+    <div class="stat">Training pairs <span id="s-objects">0</span></div>
+    <div class="stat">Epochs done <span id="s-epochs">0</span></div>
+    <div class="stat">Loss <span id="s-loss">—</span></div>
+    <div class="stat">Last trained <span id="s-time">never</span></div>
+    <div class="stat">Generations <span id="s-gens">0</span></div>
+    <div style="margin-top:12px;">
+      <div style="font-size:9px;color:#333;margin-bottom:4px;">TRAINING PROGRESS</div>
+      <div class="progress-bar"><div class="progress-fill" id="prog" style="width:0%"></div></div>
+    </div>
+  </div>
+
+  <div class="panel" style="flex:1;">
+    <h2>CONTROLS</h2>
+    <button class="btn" id="btn-train" onclick="trainNow()"> Train Now</button>
+    <button class="btn green" id="btn-gen" onclick="generateLevel()" disabled>✦ Generate Level</button>
+    <button class="btn" onclick="saveToFirebase()" id="btn-save" disabled> Save to ClareDash</button>
+    <button class="btn red" onclick="document.getElementById('log').innerHTML=''">✕ Clear Log</button>
+    <div style="margin-top:14px;font-size:10px;color:#445;display:flex;align-items:center;gap:8px;flex-wrap:wrap;">
+      <span>Creativity:</span>
+      <input type="range" min="5" max="120" value="40" id="temp-slider" style="width:110px;" oninput="document.getElementById('temp-val').textContent=(this.value/100).toFixed(2)">
+      <span id="temp-val" style="color:#88aaff;width:32px;">0.40</span>
+      <span style="margin-left:8px;">Length:</span>
+      <input type="range" min="8" max="80" value="28" id="len-slider" style="width:110px;" oninput="document.getElementById('len-val').textContent=this.value">
+      <span id="len-val" style="color:#88aaff;width:24px;">28</span>
+    </div>
+    <div style="margin-top:10px;font-size:9px;color:#2e4a3a;"> Auto-retrains every hour in background</div>
+  </div>
+</div>
+
+<div class="panel">
+  <h2>TRAINING LOG</h2>
+  <div class="log" id="log"></div>
+</div>
+
+<div class="panel" id="preview-panel" style="display:none;">
+  <h2>GENERATED LEVEL — <span id="gen-name" style="color:#f9ca24;"></span></h2>
+  <div id="canvas-wrap"><canvas id="preview-canvas" height="140"></canvas></div>
+  <div style="margin-top:8px;font-size:9px;color:#445;" id="gen-stats"></div>
+  <div style="margin-top:8px;"><textarea id="gen-json" readonly></textarea></div>
+</div>
+
+<script>
+// ── Firebase ──
+const fbCfg={
+  apiKey:"AIzaSyB9Rlvq49-AiLBzMDvjz71QCTT4d6NqE98",
+  authDomain:"mychat-28205.firebaseapp.com",
+  databaseURL:"https://mychat-28205-default-rtdb.firebaseio.com",
+  projectId:"mychat-28205",
+  storageBucket:"mychat-28205.firebasestorage.app",
+  messagingSenderId:"522121848657",
+  appId:"1:522121848657:web:7108993439310bf6da5570"
+};
+firebase.initializeApp(fbCfg);
+const db=firebase.database();
+
+// ── Constants ──
+const GROUND_Y=360;
+const BLOCK_TYPES=[
+  'block','spike','orb','plat','solidblock','pad',
+  'gravityorb','negorb','coin','shipportal','waveportal',
+  'spiderportal','ballportal','trigger','glowblock'
+];
+const NT=BLOCK_TYPES.length; // 15 type classes
+
+// ── Network dims ──
+// Input:  type_onehot(NT) + x_n + y_n + w_n + h_n + prev_type_onehot(NT) = NT*2+4
+// Hidden: 96 → 48
+// Output: type_onehot(NT) + dx_n + dy_n + w_n + h_n = NT+4
+const IN=NT*2+4, H1=96, H2=48, OUT=NT+4;
+
+let W1,b1,W2,b2,W3,b3;
+let trained=false;
+let genCount=0;
+let lastGenLevel=null;
+
+// ── Weight init ──
+function randn(scale){
+  const u=Math.random()||1e-10,v=Math.random()||1e-10;
+  return Math.sqrt(-2*Math.log(u))*Math.cos(2*Math.PI*v)*scale;
+}
+function initWeights(){
+  const mk=(r,c,s)=>Array.from({length:r},()=>Array.from({length:c},()=>randn(s)));
+  W1=mk(H1,IN,Math.sqrt(2/IN));  b1=new Array(H1).fill(0);
+  W2=mk(H2,H1,Math.sqrt(2/H1));  b2=new Array(H2).fill(0);
+  W3=mk(OUT,H2,Math.sqrt(2/H2)); b3=new Array(OUT).fill(0);
+}
+
+// ── Activations ──
+const relu=x=>Math.max(0,x);
+const sig=x=>1/(1+Math.exp(-Math.min(Math.max(x,-20),20)));
+function softmax(arr){
+  const m=Math.max(...arr);
+  const e=arr.map(x=>Math.exp(x-m));
+  const s=e.reduce((a,b)=>a+b,0)||1;
+  return e.map(x=>x/s);
+}
+
+// ── Forward ──
+function matVec(M,v,b){return b.map((bi,i)=>bi+M[i].reduce((s,w,j)=>s+w*v[j],0));}
+function forward(inp){
+  const h1=matVec(W1,inp,b1).map(relu);
+  const h2=matVec(W2,h1,b2).map(relu);
+  const raw=matVec(W3,h2,b3);
+  return[...softmax(raw.slice(0,NT)),...raw.slice(NT).map(sig)];
+}
+
+// ── Encoding ──
+function oneHot(idx,n){const h=new Array(n).fill(0);h[Math.max(0,Math.min(idx,n-1))]=1;return h;}
+function typeIdx(t){const i=BLOCK_TYPES.indexOf(t);return i<0?0:i;}
+function encodeSeq(cur,prev,prevPrev,maxX){
+  return[
+    ...oneHot(typeIdx(cur.t),NT),
+    (cur.x||0)/maxX,
+    Math.min((cur.y||0),GROUND_Y)/GROUND_Y,
+    Math.min((cur.w||40),400)/400,
+    Math.min((cur.h||40),400)/400,
+    ...oneHot(typeIdx(prev?prev.t:'block'),NT)
+  ];
+}
+function encodeTarget(cur,prev,maxX){
+  const dx=prev?Math.min(Math.max((cur.x-(prev.x||0)),0),800)/800:0.15;
+  const dy=prev?(((cur.y||0)-(prev.y||0))+GROUND_Y)/(2*GROUND_Y):0.5;
+  return[
+    ...oneHot(typeIdx(cur.t),NT),
+    Math.min(Math.max(dx,0),1),
+    Math.min(Math.max(dy,0),1),
+    Math.min((cur.w||40),400)/400,
+    Math.min((cur.h||40),400)/400
+  ];
+}
+
+// ── Build training data ──
+function buildData(levels){
+  const inputs=[],targets=[];
+  for(const lv of levels){
+    const obs=(lv.obs||[])
+      .filter(o=>BLOCK_TYPES.includes(o.t))
+      .sort((a,b)=>(a.x||0)-(b.x||0));
+    if(obs.length<3)continue;
+    const maxX=Math.max(...obs.map(o=>o.x||0),800);
+    for(let i=1;i<obs.length;i++){
+      const inp=encodeSeq(obs[i-1],i>=2?obs[i-2]:null,null,maxX);
+      const tgt=encodeTarget(obs[i],obs[i-1],maxX);
+      if(inp.length===IN&&tgt.length===OUT){inputs.push(inp);targets.push(tgt);}
+    }
+  }
+  return{inputs,targets};
+}
+
+// ── Backprop / SGD ──
+function trainBatch(bIn,bTgt,lr){
+  const n=bIn.length;
+  const dW1=W1.map(r=>r.map(()=>0)),db1_=b1.map(()=>0);
+  const dW2=W2.map(r=>r.map(()=>0)),db2_=b2.map(()=>0);
+  const dW3=W3.map(r=>r.map(()=>0)),db3_=b3.map(()=>0);
+  let totalLoss=0;
+
+  for(let s=0;s<n;s++){
+    const inp=bIn[s],tgt=bTgt[s];
+    // Forward
+    const z1=matVec(W1,inp,b1),h1=z1.map(relu);
+    const z2=matVec(W2,h1,b2),h2=z2.map(relu);
+    const raw=matVec(W3,h2,b3);
+    const typeP=softmax(raw.slice(0,NT));
+    const restS=raw.slice(NT).map(sig);
+    const out=[...typeP,...restS];
+    // Loss
+    const dOut=out.map((o,i)=>2*(o-tgt[i])/OUT);
+    totalLoss+=dOut.reduce((a,d,i)=>a+d*(out[i]-tgt[i]),0);
+    // dZ3
+    const dZ3=new Array(OUT).fill(0);
+    for(let i=0;i<NT;i++) for(let j=0;j<NT;j++) dZ3[j]+=(typeP[j]-(j===i?1:0))*dOut[i];
+    for(let i=NT;i<OUT;i++){const s2=restS[i-NT];dZ3[i]=dOut[i]*s2*(1-s2);}
+    // Accumulate W3/b3
+    for(let i=0;i<OUT;i++){db3_[i]+=dZ3[i];for(let j=0;j<H2;j++)dW3[i][j]+=dZ3[i]*h2[j];}
+    // dH2 → dZ2
+    const dH2=new Array(H2).fill(0);
+    for(let j=0;j<H2;j++) for(let i=0;i<OUT;i++) dH2[j]+=dZ3[i]*W3[i][j];
+    const dZ2=dH2.map((d,j)=>z2[j]>0?d:0);
+    for(let i=0;i<H2;i++){db2_[i]+=dZ2[i];for(let j=0;j<H1;j++)dW2[i][j]+=dZ2[i]*h1[j];}
+    // dH1 → dZ1
+    const dH1=new Array(H1).fill(0);
+    for(let j=0;j<H1;j++) for(let i=0;i<H2;i++) dH1[j]+=dZ2[i]*W2[i][j];
+    const dZ1=dH1.map((d,j)=>z1[j]>0?d:0);
+    for(let i=0;i<H1;i++){db1_[i]+=dZ1[i];for(let j=0;j<IN;j++)dW1[i][j]+=dZ1[i]*inp[j];}
+  }
+
+  // Apply
+  for(let i=0;i<H1;i++){b1[i]-=lr*db1_[i]/n;for(let j=0;j<IN;j++)W1[i][j]-=lr*dW1[i][j]/n;}
+  for(let i=0;i<H2;i++){b2[i]-=lr*db2_[i]/n;for(let j=0;j<H1;j++)W2[i][j]-=lr*dW2[i][j]/n;}
+  for(let i=0;i<OUT;i++){b3[i]-=lr*db3_[i]/n;for(let j=0;j<H2;j++)W3[i][j]-=lr*dW3[i][j]/n;}
+  return totalLoss/n;
+}
+
+// ── Log helpers ──
+function log(msg,cls='info'){
+  const el=document.getElementById('log');
+  const d=document.createElement('div');d.className=cls;
+  d.textContent='['+new Date().toLocaleTimeString()+'] '+msg;
+  el.appendChild(d);el.scrollTop=el.scrollHeight;
+}
+
+// ── Main train flow ──
+let isTraining=false;
+async function trainNow(){
+  if(isTraining){log('Already training — please wait.','warn');return;}
+  isTraining=true;
+  document.getElementById('btn-train').disabled=true;
+  document.getElementById('btn-train').textContent='Training...';
+
+  // Fetch
+  log('Fetching levels from Firebase...','accent');
+  const snap=await db.ref('claredash_levels').once('value');
+  const levels=[];
+  snap.forEach(c=>{const v=c.val();if(v&&v.obs&&v.obs.length>3)levels.push(v);});
+  log('Loaded '+levels.length+' levels.','good');
+  document.getElementById('s-levels').textContent=levels.length;
+  if(!levels.length){log('No levels to train on.','warn');isTraining=false;document.getElementById('btn-train').disabled=false;document.getElementById('btn-train').textContent='⚡ Train Now';return;}
+
+  const {inputs,targets}=buildData(levels);
+  log('Built '+inputs.length+' training sequences.','accent');
+  document.getElementById('s-objects').textContent=inputs.length;
+  if(!inputs.length){log('Not enough data.','warn');isTraining=false;document.getElementById('btn-train').disabled=false;document.getElementById('btn-train').textContent='⚡ Train Now';return;}
+
+  if(!trained)initWeights();
+
+  const EPOCHS=300,BATCH=32;
+  let lr=0.008;
+  log('Training '+EPOCHS+' epochs ('+H1+'-'+H2+' hidden, '+inputs.length+' pairs)...','accent');
+
+  for(let ep=0;ep<EPOCHS;ep++){
+    const idx=[...Array(inputs.length).keys()].sort(()=>Math.random()-0.5);
+    let el=0,eb=0;
+    for(let b=0;b<idx.length;b+=BATCH){
+      const bi=idx.slice(b,b+BATCH);
+      el+=trainBatch(bi.map(i=>inputs[i]),bi.map(i=>targets[i]),lr);
+      eb++;
+    }
+    const avgLoss=el/eb;
+    // LR decay
+    if((ep+1)%100===0)lr*=0.7;
+    document.getElementById('prog').style.width=((ep+1)/EPOCHS*100)+'%';
+    document.getElementById('s-epochs').textContent=ep+1;
+    document.getElementById('s-loss').textContent=avgLoss.toFixed(4);
+    if((ep+1)%50===0||ep===0){
+      log('Epoch '+(ep+1)+'/'+EPOCHS+' — loss: '+avgLoss.toFixed(4),(avgLoss<0.04?'good':'info'));
+      await new Promise(r=>setTimeout(r,1));
+    }
+  }
+
+  trained=true;
+  document.getElementById('s-time').textContent=new Date().toLocaleTimeString();
+  document.getElementById('btn-gen').disabled=false;
+  document.getElementById('btn-train').disabled=false;
+  document.getElementById('btn-train').textContent=' Train Now';
+  log('✓ Training complete! Click "Generate Level" to create a level.','good');
+  isTraining=false;
+}
+
+// ── Generation ──
+function tempSample(probs,temp){
+  const logits=probs.map(p=>Math.log((p||1e-9))/temp);
+  return softmax(logits);
+}
+function pick(probs){let r=Math.random(),a=0;for(let i=0;i<probs.length;i++){a+=probs[i];if(r<=a)return i;}return probs.length-1;}
+
+function generateLevel(){
+  if(!trained){log('Train the network first!','warn');return;}
+  const temp=parseFloat(document.getElementById('temp-val').textContent)||0.4;
+  const len=parseInt(document.getElementById('len-val').textContent)||28;
+  log('Generating level (creativity='+temp+', length='+len+')...','gen');
+
+  const obs=[];
+  obs.push({t:'startblock',x:80,y:GROUND_Y-40,w:40,h:40,touchable:true});
+
+  let curX=220;
+  const maxX=4000;
+  const AVOID_PORTAL=new Set(['shipportal','waveportal','spiderportal','ballportal','trigger']);
+
+  for(let i=0;i<len;i++){
+    const last=obs[obs.length-1];
+    const prev2=obs.length>=2?obs[obs.length-2]:null;
+    const inp=encodeSeq(last,prev2,null,maxX);
+    const out=forward(inp);
+
+    // Sample type
+    let tProbs=tempSample(out.slice(0,NT),temp);
+    // Reduce portal/trigger probability
+    AVOID_PORTAL.forEach(t=>{const idx=typeIdx(t);tProbs[idx]*=0.15;});
+    // Re-normalize
+    const tSum=tProbs.reduce((a,b)=>a+b,0);
+    tProbs=tProbs.map(p=>p/tSum);
+    const ti=pick(tProbs);
+    const t=BLOCK_TYPES[ti];
+
+    // Decode position/size + noise scaled by temp
+    const noise=()=>randn(temp*25);
+    const dx=Math.max(30,Math.min(600,out[NT]*500+80+noise()));
+    const dyRel=(out[NT+1]*2-1)*GROUND_Y*0.4+noise();
+    const wRaw=Math.max(20,Math.min(300,out[NT+2]*300+20+noise()));
+    const hRaw=Math.max(20,Math.min(200,out[NT+3]*200+20+noise()));
+
+    curX+=Math.round(dx);
+    const baseY=last.y||GROUND_Y-40;
+    const y=Math.min(GROUND_Y-hRaw,Math.max(0,Math.round(baseY+dyRel)));
+
+    obs.push({t,x:Math.round(curX),y:Math.round(y),w:Math.round(wRaw),h:Math.round(hRaw),touchable:true,alpha:0,color:null,bounce:50});
+  }
+
+  obs.push({t:'endblock',x:curX+240,y:GROUND_Y-40,w:40,h:40,touchable:true});
+
+  genCount++;
+  const name='AI Level #'+genCount;
+  lastGenLevel={
+    name,
+    author:'__nn__',
+    obs,
+    speed:4,
+    jumpHeight:50,
+    bgColor:'#1a1a2e',
+    groundColor:'#252545',
+    created:Date.now(),
+    private:false,
+    sharedWith:[],
+    aiGenerated:true
+  };
+
+  document.getElementById('s-gens').textContent=genCount;
+  document.getElementById('btn-save').disabled=false;
+  document.getElementById('gen-name').textContent=name;
+
+  // Type summary
+  const tc={};obs.forEach(o=>{tc[o.t]=(tc[o.t]||0)+1;});
+  document.getElementById('gen-stats').textContent=
+    obs.length+' objects — '+Object.entries(tc).map(([k,v])=>k+'×'+v).join('  ');
+
+  document.getElementById('gen-json').value=JSON.stringify(lastGenLevel,null,2);
+  document.getElementById('preview-panel').style.display='';
+  renderPreview(obs);
+
+  log('Generated "'+name+'" with '+obs.length+' objects.','gen');
+}
+
+// ── Preview render ──
+const PREV_COLORS={
+  block:'#2a2a5a',spike:'#dd3333',orb:'rgba(255,220,0,0.9)',
+  plat:'#5555aa',solidblock:'#cccccc',pad:'#22cc77',
+  gravityorb:'#ff4444',negorb:'#8844ff',coin:'#f9ca24',
+  shipportal:'#ffcc00',waveportal:'#00ccff',spiderportal:'#cc44ff',
+  ballportal:'#44ffaa',trigger:'#e8a000',glowblock:'#ff6688',
+  startblock:'rgba(46,213,115,0.5)',endblock:'rgba(232,255,0,0.5)'
+};
+
+function renderPreview(obs){
+  const canvas=document.getElementById('preview-canvas');
+  const wrap=document.getElementById('canvas-wrap');
+  const maxWorldX=Math.max(...obs.map(o=>(o.x||0)+(o.w||40)))+80;
+  canvas.width=Math.min(maxWorldX, wrap.offsetWidth||800);
+  const SCALE=canvas.height/GROUND_Y;
+  const ctx=canvas.getContext('2d');
+
+  ctx.fillStyle='#1a1a2e';ctx.fillRect(0,0,canvas.width,canvas.height);
+  // Ground
+  ctx.fillStyle='#252545';ctx.fillRect(0,GROUND_Y*SCALE,canvas.width,20);
+
+  obs.forEach(o=>{
+    const x=o.x||0,y=(o.y||0)*SCALE,w=o.w||40,h=(o.h||40)*SCALE;
+    const col=PREV_COLORS[o.t]||'#888';
+    ctx.fillStyle=col;
+    if(o.t==='orb'||o.t==='gravityorb'||o.t==='negorb'){
+      ctx.beginPath();ctx.arc(x+w/2,y+h/2,Math.min(w,h)/2,0,Math.PI*2);ctx.fill();
+    } else if(o.t==='spike'){
+      ctx.beginPath();ctx.moveTo(x+w/2,y);ctx.lineTo(x+w,y+h);ctx.lineTo(x,y+h);ctx.closePath();ctx.fill();
+    } else {
+      ctx.fillRect(x,y,w,h);
+    }
+    // Mini label
+    ctx.fillStyle='rgba(255,255,255,0.4)';ctx.font='6px monospace';ctx.textAlign='center';
+    const shortName=o.t.replace('block','').replace('portal','p').replace('solid','sol');
+    ctx.fillText(shortName,x+w/2,y+h/2+2);
+  });
+}
+
+// ── Save to Firebase ──
+async function saveToFirebase(){
+  if(!lastGenLevel){log('Generate a level first!','warn');return;}
+  document.getElementById('btn-save').disabled=true;
+  log('Saving "'+lastGenLevel.name+'" to ClareDash...','accent');
+  try{
+    await db.ref('claredash_levels').push(lastGenLevel);
+    log('✓ Saved! Level now appears in ClareDash Play tab.','good');
+  }catch(e){
+    log('Save failed: '+e.message,'warn');
+    document.getElementById('btn-save').disabled=false;
+  }
+}
+
+// ── Init ──
+initWeights();
+log('Network ready. Architecture: '+IN+'→'+H1+'→'+H2+'→'+OUT,'accent');
+log('Click Train Now to learn from all ClareDash levels.','info');
+
+// Auto-retrain every hour
+setInterval(()=>{log('AUTO-TRAIN START','accent');trainNow();},60*60*1000);
+</script>
+</body>
+</html>
