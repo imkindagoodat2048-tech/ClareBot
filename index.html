@@ -470,7 +470,7 @@ function generateLevel(){
 
   let curX=220;
   const maxX=4000;
-  const AVOID_PORTAL=new Set(['shipportal','waveportal','spiderportal','ballportal','trigger']);
+
 
   for(let i=0;i<len;i++){
     const last=obs[obs.length-1];
@@ -478,10 +478,11 @@ function generateLevel(){
     const inp=encodeSeq(last,prev2,null,maxX);
     const out=forward(inp);
 
-    // Sample type - coins excluded from BLOCK_TYPES already
+    // Sample type
     let tProbs=tempSample(out.slice(0,NT),temp);
-    // Reduce portal/trigger probability
-    AVOID_PORTAL.forEach(t=>{const idx=typeIdx(t);tProbs[idx]*=0.15;});
+    // Suppress rare/disruptive types and cap textblock at ~5%
+    const SUPPRESS={shipportal:0.08,waveportal:0.08,spiderportal:0.08,ballportal:0.08,trigger:0.05,textblock:0.05};
+    Object.entries(SUPPRESS).forEach(([st,mult])=>{const si=typeIdx(st);if(si>=0)tProbs[si]*=mult;});
     const tSum=tProbs.reduce((a,b)=>a+b,0);
     tProbs=tProbs.map(p=>p/tSum);
     const ti=pick(tProbs);
@@ -507,7 +508,8 @@ function generateLevel(){
     const y=Math.min(GROUND_Y-hRaw,Math.max(0,Math.round(baseY+dyRel)));
 
     const obj={t,x:Math.round(curX),y:Math.round(y),w:Math.round(wRaw),h:Math.round(hRaw),
-      touchable:true,alpha:0,color:null,bounce:50,version:maxV>1?version:undefined};
+      touchable:true,bounce:50};
+    if(maxV>1) obj.version=version;
 
     // Text block: generate text content
     if(t==='textblock'){
