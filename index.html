@@ -503,13 +503,18 @@ function generateLevel(){
     // Decode position/size + noise
     const noise=()=>randn(temp*25);
     const dx=Math.max(30,Math.min(600,out[NT+1]*500+80+noise()));
-    const dyRel=(out[NT+2]*2-1)*GROUND_Y*0.4+noise();
     const wRaw=Math.max(20,Math.min(300,out[NT+3]*300+20+noise()));
     const hRaw=Math.max(20,Math.min(200,out[NT+4]*200+20+noise()));
 
     curX+=Math.round(dx);
-    const baseY=last.y||GROUND_Y-40;
-    const y=Math.min(GROUND_Y-hRaw,Math.max(0,Math.round(baseY+dyRel)));
+
+    // Y placement: bias strongly toward ground, allow occasional elevated objects
+    const groundY=GROUND_Y-hRaw; // y value that puts object flush on the ground
+    const dyRel=(out[NT+2]*2-1)*GROUND_Y*0.35+noise();
+    // 70% chance: snap to ground. 30% chance: allow elevated position
+    const elevated=Math.random()<0.3;
+    const rawY=elevated ? Math.round(groundY+dyRel) : groundY;
+    const y=Math.min(groundY,Math.max(0,rawY)); // never go below ground or above sky
 
     const obj={t,x:Math.round(curX),y:Math.round(y),w:Math.round(wRaw),h:Math.round(hRaw),
       touchable:true,bounce:50};
