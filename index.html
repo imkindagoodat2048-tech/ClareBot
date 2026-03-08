@@ -481,9 +481,12 @@ function generateLevel(){
 
     // Sample type
     let tProbs=tempSample(out.slice(0,NT),temp);
-    // Suppress rare/disruptive types and cap textblock at ~5%
-    const SUPPRESS={shipportal:0.08,waveportal:0.08,spiderportal:0.08,ballportal:0.08,trigger:0.05,textblock:0.05};
+    // Suppress portals/triggers
+    const SUPPRESS={shipportal:0.08,waveportal:0.08,spiderportal:0.08,ballportal:0.08,trigger:0.05};
     Object.entries(SUPPRESS).forEach(([st,mult])=>{const si=typeIdx(st);if(si>=0)tProbs[si]*=mult;});
+    // Hard-zero textblock if limit reached, otherwise keep it rare
+    const tbIdx=typeIdx('textblock');
+    tProbs[tbIdx]=textBlockCount>=3 ? 0 : tProbs[tbIdx]*0.04;
     const tSum=tProbs.reduce((a,b)=>a+b,0);
     tProbs=tProbs.map(p=>p/tSum);
     const ti=pick(tProbs);
