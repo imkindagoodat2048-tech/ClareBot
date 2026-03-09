@@ -68,7 +68,7 @@ textarea{width:100%;background:#070710;border:1px solid #1e1e3a;color:#88aaff;fo
       <input type="range" min="8" max="80" value="28" id="len-slider" style="width:110px;" oninput="document.getElementById('len-val').textContent=this.value">
       <span id="len-val" style="color:#88aaff;width:24px;">28</span>
     </div>
-    <div style="margin-top:10px;font-size:9px;color:#2e4a3a;">⏰ Auto-retrains every hour in background</div>
+    <div style="margin-top:10px;font-size:9px;color:#2e4a3a;" id="bg-status">🧠 Continuous background learning active</div>
   </div>
 </div>
 
@@ -465,65 +465,202 @@ function generateLevel(){
   const len=parseInt(document.getElementById('len-val').textContent)||28;
   log('Generating level (creativity='+temp+', length='+len+')...','gen');
 
+  const GH=GROUND_Y; // ground Y = 360
+  const JUMP_H=50;   // default jump height
+  // Approximate max jump arc height in pixels at jumpHeight=50
+  const MAX_JUMP_RISE=110;
+  const MAX_JUMP_DIST=220; // px of horizontal travel during a full jump
+
+  // ── NN picks type, rules handle placement ──
+  // Type budget: what types are "interesting" vs filler
+  const FILLER=['block','solidblock','plat'];
+  const AERIAL=['orb','gravityorb','negorb','pad'];
+  const PORTAL=['shipportal','waveportal','spiderportal','ballportal'];
+  const HAZARD=['spike'];
+
+  // Budget: portals rare, hazards common, aerial moderate
+  // NN probabilities are suppressed/boosted here
+  const TYPE_MULT={
+    block:1.4, solidblock:0.6, plat:1.2,
+    spike:1.5, pad:1.0, orb:1.2,
+    gravityorb:0.3, negorb:0.4,
+    shipportal:0.12, waveportal:0.12, spiderportal:0.08, ballportal:0.08,
+    trigger:0.04, textblock:0.04, glowblock:0.3, special:0.15
+  };
+
+  const rnd=(a,b)=>a+Math.random()*(b-a);
   const obs=[];
-  obs.push({t:'startblock',x:80,y:GROUND_Y-40,w:40,h:40,touchable:true});
+  obs.push({t:'startblock',x:80,y:GH-40,w:40,h:40,touchable:true});
+
+  let curX=200;
   let textBlockCount=0;
+  let portalActive=null;   // null | 'ship' | 'wave' | 'spider' | 'ball'
+  let portalEndX=0;        // when to "end" the portal section
+  let spawnedPortal=false; // only one portal section per level
 
-  let curX=220;
-  const maxX=4000;
-
-
-  for(let i=0;i<len;i++){
-    const last=obs[obs.length-1];
+  // Helper: pick type via NN + rules
+  function pickType(lastObj){
     const prev2=obs.length>=2?obs[obs.length-2]:null;
-    const inp=encodeSeq(last,prev2,null,maxX);
+    const inp=encodeSeq(lastObj,prev2,null,4000);
     const out=forward(inp);
-
-    // Sample type
     let tProbs=tempSample(out.slice(0,NT),temp);
-    // Suppress portals/triggers
-    const SUPPRESS={shipportal:0.08,waveportal:0.08,spiderportal:0.08,ballportal:0.08,trigger:0.05};
-    Object.entries(SUPPRESS).forEach(([st,mult])=>{const si=typeIdx(st);if(si>=0)tProbs[si]*=mult;});
-    // Hard-zero textblock if limit reached, otherwise keep it rare
-    const tbIdx=typeIdx('textblock');
-    tProbs[tbIdx]=textBlockCount>=3 ? 0 : tProbs[tbIdx]*0.04;
-    const tSum=tProbs.reduce((a,b)=>a+b,0);
-    tProbs=tProbs.map(p=>p/tSum);
-    const ti=pick(tProbs);
-    const t=BLOCK_TYPES[ti];
 
-    // Pick version for versioned types
-    const maxV=TYPE_MAX_VERSION[t]||1;
-    let version=1;
-    if(maxV>1){
-      const vRaw=out[NT]; // version neuron
-      version=Math.max(1,Math.min(maxV,Math.round(vRaw*(maxV-1)+1+randn(temp*maxV*0.3))));
+    // Apply multipliers
+    Object.entries(TYPE_MULT).forEach(([t,m])=>{
+      const i=typeIdx(t);if(i>=0)tProbs[i]*=m;
+    });
+
+    // Textblock cap
+    const tbIdx=typeIdx('textblock');
+    tProbs[tbIdx]=textBlockCount>=3?0:tProbs[tbIdx]*0.05;
+
+    // Only one portal section — after one is placed, zero all portals
+    if(spawnedPortal){
+      ['shipportal','waveportal','spiderportal','ballportal'].forEach(t=>{
+        const i=typeIdx(t);if(i>=0)tProbs[i]=0;
+      });
     }
 
-    // Decode position/size + noise
-    const noise=()=>randn(temp*25);
-    const dx=Math.max(30,Math.min(600,out[NT+1]*500+80+noise()));
-    const wRaw=Math.max(20,Math.min(300,out[NT+3]*300+20+noise()));
-    const hRaw=Math.max(20,Math.min(200,out[NT+4]*200+20+noise()));
+    // Normalise and pick
+    const s=tProbs.reduce((a,b)=>a+b,0);
+    tProbs=tProbs.map(p=>p/s);
+    return BLOCK_TYPES[pick(tProbs)];
+  }
 
-    curX+=Math.round(dx);
+  // Helper: version for versioned types
+  function pickVersion(t, nnOut){
+    const maxV=TYPE_MAX_VERSION[t]||1;
+    if(maxV<=1)return undefined;
+    const vRaw=nnOut[NT];
+    return Math.max(1,Math.min(maxV,Math.round(vRaw*(maxV-1)+1)));
+  }
 
-    // Y placement: bias strongly toward ground, allow occasional elevated objects
-    const groundY=GROUND_Y-hRaw; // y value that puts object flush on the ground
-    const dyRel=(out[NT+2]*2-1)*GROUND_Y*0.35+noise();
-    // 70% chance: snap to ground. 30% chance: allow elevated position
-    const elevated=Math.random()<0.3;
-    const rawY=elevated ? Math.round(groundY+dyRel) : groundY;
-    const y=Math.min(groundY,Math.max(0,rawY)); // never go below ground or above sky
+  // ── PLACEMENT RULES ──
+  // Returns {x, y, w, h} for each type with physically correct placement
+  function placeObject(t, curX, lastObj){
+    const r=()=>(Math.random()-0.5)*2; // -1..1
 
-    const obj={t,x:Math.round(curX),y:Math.round(y),w:Math.round(wRaw),h:Math.round(hRaw),
-      touchable:true,bounce:50};
-    if(maxV>1) obj.version=version;
+    if(t==='block'||t==='solidblock'){
+      const w=Math.round(rnd(40,160)/40)*40;  // snap to 40px grid
+      const h=Math.round(rnd(40,120)/40)*40;
+      // 60% sit on ground, 40% elevated (must be reachable)
+      const onGround=Math.random()<0.6;
+      const y=onGround?(GH-h):Math.max(GH-h-MAX_JUMP_RISE*0.8, 40);
+      const gap=Math.round(rnd(60,180)/40)*40;
+      return{x:curX+gap,y,w,h};
+    }
 
-    // Text block: generate text content
+    if(t==='plat'){
+      const w=Math.round(rnd(80,200)/40)*40;
+      const h=14;
+      // Platforms always elevated and reachable
+      const y=Math.round(rnd(GH-MAX_JUMP_RISE*0.9, GH-80)/10)*10;
+      const gap=Math.round(rnd(80,160)/40)*40;
+      return{x:curX+gap,y,w,h};
+    }
+
+    if(t==='spike'){
+      const w=28;const h=28;
+      // Spikes sit on ground or on top of the last block
+      const onLastBlock=lastObj&&(lastObj.t==='block'||lastObj.t==='solidblock')&&Math.random()<0.4;
+      const y=onLastBlock?(lastObj.y-h):(GH-h);
+      const x=onLastBlock?lastObj.x+Math.round(rnd(0,lastObj.w-w)):curX+Math.round(rnd(40,120));
+      return{x,y,w,h};
+    }
+
+    if(t==='pad'){
+      const w=40;const h=18;
+      const y=GH-h;  // pads always on ground
+      return{x:curX+Math.round(rnd(60,140)),y,w,h};
+    }
+
+    if(t==='orb'||t==='gravityorb'||t==='negorb'){
+      const w=28;const h=28;
+      // Orbs float at jump height — must be over a gap or block
+      const floatY=Math.round(rnd(GH-MAX_JUMP_RISE*0.5, GH-MAX_JUMP_RISE*0.9)/10)*10;
+      return{x:curX+Math.round(rnd(80,200)),y:floatY,w,h};
+    }
+
+    if(t==='shipportal'||t==='waveportal'||t==='spiderportal'||t==='ballportal'){
+      const w=40;const h=80;
+      const y=GH-h;
+      return{x:curX+Math.round(rnd(80,160)),y,w,h};
+    }
+
+    if(t==='textblock'){
+      // Float near top of screen, never on ground
+      const y=Math.round(rnd(10,80));
+      return{x:curX+Math.round(rnd(60,200)),y,w:20,h:20};
+    }
+
+    if(t==='glowblock'){
+      const w=Math.round(rnd(80,200)/40)*40;
+      const h=Math.round(rnd(60,160)/40)*40;
+      const y=Math.round(rnd(0,GH-h));
+      return{x:curX+Math.round(rnd(60,160)),y,w,h};
+    }
+
+    if(t==='trigger'){
+      return{x:curX+Math.round(rnd(100,300)),y:0,w:8,h:GH};
+    }
+
+    if(t==='special'){
+      const w=40;const h=40;
+      const y=GH-h;
+      return{x:curX+Math.round(rnd(80,160)),y,w,h};
+    }
+
+    // default
+    const w=40;const h=40;
+    return{x:curX+Math.round(rnd(60,160)),y:GH-h,w,h};
+  }
+
+  // ── MAIN GENERATION LOOP ──
+  for(let i=0;i<len;i++){
+    const lastObj=obs[obs.length-1];
+
+    // If inside a portal section, mostly place clearance blocks or nothing
+    if(portalActive&&curX<portalEndX){
+      // During portal: place some elevated platforms/orbs for the mode, no ground spikes
+      const roll=Math.random();
+      if(roll<0.4){
+        // floating platform
+        const w=Math.round(80+Math.random()*80);
+        const y=Math.round(GH-60-Math.random()*140);
+        obs.push({t:'plat',x:Math.round(curX+80+Math.random()*80),y,w,h:14,touchable:true,bounce:50});
+      } else if(roll<0.65&&(portalActive==='ship'||portalActive==='wave')){
+        // floating block obstacle — gives ship/wave something to dodge
+        const w=40;const h=40+Math.round(Math.random()*80);
+        const y=Math.round(Math.random()<0.5?0:GH-h-80-Math.random()*80);
+        obs.push({t:'block',x:Math.round(curX+80+Math.random()*100),y,w,h,touchable:true,bounce:50});
+      }
+      curX+=Math.round(120+Math.random()*80);
+      continue;
+    }
+
+    // Normal section: pick type from NN
+    let t=pickType(lastObj);
+
+    // Get NN output for version
+    const prev2=obs.length>=2?obs[obs.length-2]:null;
+    const nnOut=forward(encodeSeq(lastObj,prev2,null,4000));
+
+    // Get placement
+    const pos=placeObject(t,curX,lastObj);
+    curX=pos.x; // advance curX to placed x
+
+    // Build object
+    const obj={t,x:pos.x,y:pos.y,w:pos.w,h:pos.h,touchable:true,bounce:50};
+
+    // Version
+    const v=pickVersion(t,nnOut);
+    if(v!==undefined)obj.version=v;
+
+    // Type-specific fixups
     if(t==='textblock'){
       if(textBlockCount>=3){
-        obj.t='block'; // limit reached — replace with plain block
+        // demote to block on ground
+        obj.t='block';obj.y=GH-obj.h;obj.touchable=true;
       } else {
         obj.text=generateText(temp);
         obj.textSize=Math.round(14+Math.random()*20);
@@ -532,32 +669,49 @@ function generateLevel(){
       }
     }
 
+    if(t==='pad'){obj.touchable=true;}
+    if(t==='orb'||t==='gravityorb'||t==='negorb'){obj.touchable=false;}
+    if(t==='glowblock'){obj.touchable=false;obj.glowColor1='#'+Math.floor(Math.random()*0xffffff).toString(16).padStart(6,'0');obj.glowColor2='#'+Math.floor(Math.random()*0xffffff).toString(16).padStart(6,'0');obj.glowAlpha1=80+Math.round(Math.random()*20);obj.glowAlpha2=0;obj.glowDir=['horizontal','vertical','diagonal','radial'][Math.floor(Math.random()*4)];}
+    if(t==='trigger'){obj.touchable=false;obj.trigSpeed=Math.round(rnd(3,7)*10)/10;obj.trigJump=Math.round(rnd(30,80));}
+
+    // Portal: start a portal section
+    if(t==='shipportal'||t==='waveportal'||t==='spiderportal'||t==='ballportal'){
+      if(!spawnedPortal){
+        spawnedPortal=true;
+        portalActive=t.replace('portal','');
+        // Portal section lasts 4-8 "steps" worth of space
+        portalEndX=curX+Math.round(400+Math.random()*400);
+        // Place a blockportal at the end to exit
+        const exitX=Math.round(portalEndX+80);
+        obs.push(obj); // push portal first
+        obs.push({t:'blockportal',x:exitX,y:GH-80,w:40,h:80,touchable:true,bounce:50});
+        curX=exitX+80;
+        portalActive=null; // handled inline above
+        continue;
+      } else {
+        // Already had a portal — demote to block
+        obj.t='block';obj.y=GH-obj.h;obj.w=40;obj.h=40;obj.touchable=true;
+      }
+    }
+
     obs.push(obj);
   }
 
-  obs.push({t:'endblock',x:curX+240,y:GROUND_Y-40,w:40,h:40,touchable:true});
+  obs.push({t:'endblock',x:curX+240,y:GH-40,w:40,h:40,touchable:true});
 
   genCount++;
   const name='AI Level #'+genCount;
   lastGenLevel={
-    name,
-    author:'__nn__',
-    obs,
-    speed:4,
-    jumpHeight:50,
-    bgColor:'#1a1a2e',
-    groundColor:'#252545',
-    created:Date.now(),
-    private:false,
-    sharedWith:[],
-    aiGenerated:true
+    name,author:'__nn__',obs,
+    speed:4,jumpHeight:50,
+    bgColor:'#1a1a2e',groundColor:'#252545',
+    created:Date.now(),private:false,sharedWith:[],aiGenerated:true
   };
 
   document.getElementById('s-gens').textContent=genCount;
   document.getElementById('btn-save').disabled=false;
   document.getElementById('gen-name').textContent=name;
 
-  // Type summary
   const tc={};obs.forEach(o=>{tc[o.t]=(tc[o.t]||0)+1;});
   document.getElementById('gen-stats').textContent=
     obs.length+' objects — '+Object.entries(tc).map(([k,v])=>k+'×'+v).join('  ');
@@ -646,8 +800,74 @@ loadWeights().then(loaded=>{
   if(!loaded) log('No prior training found. Click ⚡ Train Now to begin.','info');
 });
 
-// Auto-retrain every hour
-setInterval(()=>{log('⏰ Hourly auto-retrain starting...','accent');trainNow();},60*60*1000);
+// ── Continuous background learning ──
+// Runs a few epochs at a time with long pauses, so the model keeps improving while idle.
+let _bgPairs=null;   // cached training data
+let _bgCycle=0;      // bg cycles completed
+let _bgLR=0.004;     // slow LR for background passes
+let _bgRunning=false;
+
+async function bgLearnCycle(){
+  if(isTraining||_bgRunning)return; // never overlap with manual train
+  _bgRunning=true;
+  try{
+    // Refresh data every 10 cycles to pick up new levels
+    if(!_bgPairs||_bgCycle%10===0){
+      const snap=await db.ref('claredash_levels').once('value');
+      const levels=[];
+      snap.forEach(c=>{const v=c.val();if(v&&v.obs&&v.obs.length>3)levels.push(v);});
+      if(levels.length){
+        const d=buildData(levels);
+        if(d.inputs.length){
+          _bgPairs=d;
+          document.getElementById('s-levels').textContent=levels.length;
+          document.getElementById('s-objects').textContent=d.inputs.length;
+        }
+      }
+    }
+    if(!_bgPairs||!_bgPairs.inputs.length){_bgRunning=false;return;}
+
+    // 5 epochs, slow yield between each batch
+    const EPOCHS=5,BATCH=32;
+    const {inputs,targets}=_bgPairs;
+    let totalLoss=0,batches=0;
+    for(let ep=0;ep<EPOCHS;ep++){
+      const idx=[...Array(inputs.length).keys()].sort(()=>Math.random()-0.5);
+      for(let b=0;b<idx.length;b+=BATCH){
+        const bi=idx.slice(b,b+BATCH);
+        totalLoss+=trainBatch(bi.map(i=>inputs[i]),bi.map(i=>targets[i]),_bgLR);
+        batches++;
+        await new Promise(r=>setTimeout(r,14)); // long yield = cool CPU
+      }
+      await new Promise(r=>setTimeout(r,60));
+    }
+
+    const avgLoss=totalLoss/(batches||1);
+    _bgCycle++;
+    trained=true;
+    document.getElementById('btn-gen').disabled=false;
+    _bgLR=Math.max(0.0005,_bgLR*0.997); // slow decay, floor at 0.0005
+    document.getElementById('s-epochs').textContent='bg×'+_bgCycle;
+    document.getElementById('s-loss').textContent=isFinite(avgLoss)?avgLoss.toFixed(4):'--';
+    document.getElementById('s-time').textContent=new Date().toLocaleTimeString()+' (bg)';
+
+    // Save to Firebase every 5 cycles
+    if(_bgCycle%5===0){
+      await saveWeights();
+      log('💾 Background save — cycle '+_bgCycle+', loss: '+avgLoss.toFixed(4),'accent');
+    }
+  }catch(e){
+    console.warn('bgLearn error:',e);
+  }
+  _bgRunning=false;
+}
+
+// Start 8s after load (let weights load first), then every 90s
+setTimeout(()=>{
+  log('🧠 Background learning active — model improves while you wait.','accent');
+  bgLearnCycle();
+  setInterval(bgLearnCycle,90000);
+},8000);
 </script>
 </body>
 </html>
