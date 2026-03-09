@@ -121,7 +121,7 @@ let wordFreq={};   // word → count
 // Input:  type_onehot(NT) + version_n + x_n + y_n + w_n + h_n + prev_type_onehot(NT) + prev_version_n = NT*2+6
 // Hidden: 96 → 48
 // Output: type_onehot(NT) + version_n + dx_n + dy_n + w_n + h_n = NT+5
-const IN=NT*2+6, H1=96, H2=48, OUT=NT+5;
+const IN=NT*2+7, H1=96, H2=48, OUT=NT+5; // IN: cur(type16,ver,y,w,h,dx)+prev(type16,ver,y)
 
 let W1,b1,W2,b2,W3,b3;
 let trained=false;
@@ -165,25 +165,32 @@ function typeIdx(t){const i=BLOCK_TYPES.indexOf(t);return i<0?0:i;}
 function versionNorm(o){return((o.version||1)-1)/10;} // 0..1 for versions 1-11
 
 function encodeSeq(cur,prev,prevPrev,maxX){
+  // Use GROUND_Y-relative y so "on the ground" always = 1.0
+  const yNorm=o=>Math.min(Math.max((GROUND_Y-(o.y||0)-(o.h||40))/GROUND_Y,0),1); // 0=top, 1=ground
+  const wNorm=o=>Math.min((o.w||40),400)/400;
+  const hNorm=o=>Math.min((o.h||40),400)/400;
+  // dx from prev in fixed units (0=same x, 1=600px gap)
+  const dxNorm=prev?Math.min(Math.max(((cur.x||0)-(prev.x||0))/600,0),1):0.15;
   return[
     ...oneHot(typeIdx(cur.t),NT),
     versionNorm(cur),
-    (cur.x||0)/maxX,
-    Math.min((cur.y||0),GROUND_Y)/GROUND_Y,
-    Math.min((cur.w||40),400)/400,
-    Math.min((cur.h||40),400)/400,
+    yNorm(cur),
+    wNorm(cur),
+    hNorm(cur),
+    dxNorm,
     ...oneHot(typeIdx(prev?prev.t:'block'),NT),
-    prev?versionNorm(prev):0
+    prev?versionNorm(prev):0,
+    prev?yNorm(prev):0.0, // prev y position
   ];
 }
 function encodeTarget(cur,prev,maxX){
-  const dx=prev?Math.min(Math.max((cur.x-(prev.x||0)),0),800)/800:0.15;
-  const dy=prev?(((cur.y||0)-(prev.y||0))+GROUND_Y)/(2*GROUND_Y):0.5;
+  const yNorm=o=>Math.min(Math.max((GROUND_Y-(o.y||0)-(o.h||40))/GROUND_Y,0),1);
+  const dx=prev?Math.min(Math.max(((cur.x||0)-(prev.x||0))/600,0),1):0.15;
   return[
     ...oneHot(typeIdx(cur.t),NT),
     versionNorm(cur),
-    Math.min(Math.max(dx,0),1),
-    Math.min(Math.max(dy,0),1),
+    yNorm(cur),       // target y (ground-relative, consistent across all levels)
+    Math.min(Math.max(dx,0),1), // target dx (gap to next object)
     Math.min((cur.w||40),400)/400,
     Math.min((cur.h||40),400)/400
   ];
@@ -267,15 +274,18 @@ function trainBatch(bIn,bTgt,lr){
     const typeP=softmax(raw.slice(0,NT));
     const restS=raw.slice(NT).map(sig);
     const out=[...typeP,...restS];
-    // MSE loss
-    const dOut=out.map((o,i)=>2*(o-tgt[i])/OUT);
-    const sampleLoss=dOut.reduce((a,d,i)=>a+d*(out[i]-tgt[i]),0);
+    // Cross-entropy loss for type head + MSE for continuous outputs
+    const tIdx=tgt.slice(0,NT).indexOf(1); // true type index
+    const ceLoss=-(Math.log(Math.max(typeP[tIdx],1e-9)));
+    const mseLoss=restS.reduce((a,v,i)=>a+(v-tgt[NT+i])*(v-tgt[NT+i]),0)/restS.length;
+    const sampleLoss=ceLoss+mseLoss;
     if(!isFinite(sampleLoss)){skipped++;continue;}
     totalLoss+=sampleLoss;
-    // dZ3 — softmax-CE for type head, sigmoid for rest
+    // dZ3: softmax+CE gradient = (p - onehot) for type head (clean closed form)
     const dZ3=new Array(OUT).fill(0);
-    for(let i=0;i<NT;i++) for(let j=0;j<NT;j++) dZ3[j]+=clipGrad((typeP[j]-(j===i?1:0))*dOut[i]);
-    for(let i=NT;i<OUT;i++){const sv=restS[i-NT];dZ3[i]=clipGrad(dOut[i]*sv*(1-sv));}
+    for(let j=0;j<NT;j++) dZ3[j]=clipGrad(typeP[j]-(j===tIdx?1:0));
+    // sigmoid+MSE gradient for continuous outputs
+    for(let i=NT;i<OUT;i++){const sv=restS[i-NT];dZ3[i]=clipGrad(2*(sv-tgt[i])/restS.length*sv*(1-sv));}
     // W3/b3 grads
     for(let i=0;i<OUT;i++){db3_[i]+=dZ3[i];for(let j=0;j<H2;j++)dW3[i][j]+=clipGrad(dZ3[i]*h2[j]);}
     // dH2 → dZ2
