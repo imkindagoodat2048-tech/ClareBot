@@ -341,7 +341,7 @@ async function loadWeights(){
   log('Loading shared model weights from Firebase...','accent');
   try{
     const snap=await db.ref('claredash_nn_weights').once('value');
-    if(!snap.exists()){log('No saved weights found — starting fresh.','info');initWeights();return false;}
+    if(!snap.exists()){log('No saved weights found. Restarting.','info');initWeights();return false;}
     const d=snap.val();
     // Shape validation — if architecture changed, saved weights are incompatible
     const shapeOk = d.W1&&d.W1.length===H1&&d.W1[0]&&d.W1[0].length===IN
@@ -351,7 +351,7 @@ async function loadWeights(){
                  && d.b2&&d.b2.length===H2
                  && d.b3&&d.b3.length===OUT;
     if(!shapeOk){
-      log('Saved weights have wrong shape (architecture changed) — starting fresh and clearing old weights.','warn');
+      log('Saved weights have wrong shape. Clearing all logs.','warn');
       initWeights();
       // Wipe the stale weights so next save stores the correct shape
       await db.ref('claredash_nn_weights').remove();
