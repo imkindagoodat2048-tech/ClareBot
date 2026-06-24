@@ -1,883 +1,464 @@
 <!DOCTYPE html>
-<html lang="en">
+<html>
 <head>
-<meta charset="UTF-8">
-<title>ClareDash NN</title>
-<script src="https://www.gstatic.com/firebasejs/9.17.1/firebase-app-compat.js"></script>
-<script src="https://www.gstatic.com/firebasejs/9.17.1/firebase-database-compat.js"></script>
+<title>CreepyStories</title>
+<script src="https://www.gstatic.com/firebasejs/10.7.1/firebase-app-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.7.1/firebase-firestore-compat.js"></script>
 <style>
-*{box-sizing:border-box;margin:0;padding:0;}
-body{background:#0a0a14;color:#ccc;font-family:'Courier New',monospace;padding:24px;min-height:100vh;}
-h1{font-size:20px;color:#88aaff;letter-spacing:3px;margin-bottom:2px;}
-.sub{font-size:10px;color:#333;letter-spacing:2px;margin-bottom:22px;}
-.row{display:flex;gap:16px;flex-wrap:wrap;}
-.panel{background:#0f0f1a;border:1px solid #1e1e3a;border-radius:8px;padding:16px;flex:1;min-width:280px;margin-bottom:16px;}
-.panel h2{font-size:11px;letter-spacing:2px;color:#88aaff;margin-bottom:12px;border-bottom:1px solid #1e1e3a;padding-bottom:6px;}
-.log{height:220px;overflow-y:auto;font-size:10px;line-height:1.7;}
-.log .info{color:#556;}
-.log .good{color:#2ed573;}
-.log .warn{color:#ffa502;}
-.log .accent{color:#88aaff;}
-.log .gen{color:#f9ca24;}
-.btn{background:#4834d4;border:none;color:#fff;padding:9px 20px;border-radius:5px;cursor:pointer;font-size:12px;font-family:'Courier New',monospace;letter-spacing:1px;margin-right:8px;margin-bottom:8px;transition:opacity .15s;}
-.btn:hover{opacity:.8;}
-.btn.green{background:#2e7a4a;}
-.btn.red{background:#eb4d4b;}
-.btn:disabled{background:#222;color:#444;cursor:not-allowed;opacity:1;}
-.stat{display:flex;justify-content:space-between;font-size:10px;padding:3px 0;border-bottom:1px solid #111;}
-.stat span{color:#88aaff;}
-#canvas-wrap{width:100%;overflow-x:auto;}
-canvas{display:block;background:#1a1a2e;border:1px solid #2a2a5a;border-radius:4px;}
-.progress-bar{height:6px;background:#1e1e3a;border-radius:3px;margin:8px 0;}
-.progress-fill{height:100%;border-radius:3px;background:#4834d4;transition:width .2s;}
-textarea{width:100%;background:#070710;border:1px solid #1e1e3a;color:#88aaff;font-family:'Courier New',monospace;font-size:9px;padding:8px;border-radius:4px;resize:vertical;height:100px;}
+body {
+font-family: arial;
+background-color: white;
+color: black;
+margin: 20px;
+}
+input, select, textarea {
+display: block;
+margin-bottom: 10px;
+width: 300px;
+border: 1px solid black;
+background: white;
+color: black;
+}
+button {
+border: 1px solid black;
+background: white;
+color: black;
+cursor: pointer;
+}
+.page {
+display: none;
+}
+.story-box {
+border: 1px solid black;
+margin-bottom: 10px;
+padding: 10px;
+cursor: pointer;
+}
 </style>
 </head>
 <body>
 
-<h1>CLAREDASH NEURAL NETWORK</h1>
-<div class="sub">LEVEL GENERATION ENGINE — learns from all existing levels, generates on demand</div>
+<h3>Where u can make YOUR Scary Stores!</h3>
 
-<div class="row">
-  <div class="panel" style="min-width:220px;max-width:250px;flex:0 0 220px;">
-    <h2>STATUS</h2>
-    <div class="stat">Levels learned <span id="s-levels">0</span></div>
-    <div class="stat">Training pairs <span id="s-objects">0</span></div>
-    <div class="stat">Epochs done <span id="s-epochs">0</span></div>
-    <div class="stat">Loss <span id="s-loss">—</span></div>
-    <div class="stat">Last trained <span id="s-time">never</span></div>
-    <div class="stat">Generations <span id="s-gens">0</span></div>
-    <div style="margin-top:12px;">
-      <div style="font-size:9px;color:#333;margin-bottom:4px;">TRAINING PROGRESS</div>
-      <div class="progress-bar"><div class="progress-fill" id="prog" style="width:0%"></div></div>
-    </div>
-  </div>
-
-  <div class="panel" style="flex:1;">
-    <h2>CONTROLS</h2>
-    <button class="btn" id="btn-train" onclick="trainNow()">⚡ Train Now</button>
-    <button class="btn green" id="btn-gen" onclick="generateLevel()" disabled>✦ Generate Level</button>
-    <button class="btn" onclick="saveToFirebase()" id="btn-save" disabled>💾 Save to ClareDash</button>
-    <button class="btn" onclick="saveWeights()" style="background:#2a4a6a;">📡 Save Weights</button>
-    <button class="btn red" onclick="document.getElementById('log').innerHTML=''">✕ Clear Log</button>
-    <div style="margin-top:14px;font-size:10px;color:#445;display:flex;align-items:center;gap:8px;flex-wrap:wrap;">
-      <span>Creativity:</span>
-      <input type="range" min="5" max="120" value="40" id="temp-slider" style="width:110px;" oninput="document.getElementById('temp-val').textContent=(this.value/100).toFixed(2)">
-      <span id="temp-val" style="color:#88aaff;width:32px;">0.40</span>
-      <span style="margin-left:8px;">Length:</span>
-      <input type="range" min="8" max="80" value="28" id="len-slider" style="width:110px;" oninput="document.getElementById('len-val').textContent=this.value">
-      <span id="len-val" style="color:#88aaff;width:24px;">28</span>
-    </div>
-    <div style="margin-top:10px;font-size:9px;color:#2e4a3a;" id="bg-status">🧠 Continuous background learning active</div>
-  </div>
+<div id="authPage" class="page" style="display:block;">
+<h4>Login</h4>
+<input type="text" id="nameIn" placeholder="Username (letters, numbers, _ only)">
+<input type="password" id="passIn" placeholder="Password">
+<button onclick="login()">Login</button>
+<br><br>
+<h4>Make Account</h4>
+<input type="text" id="nameIn2" placeholder="Username (letters, numbers, _ only)">
+<input type="password" id="passIn2" placeholder="Password">
+<button onclick="signup()">Signup</button>
 </div>
 
-<div class="panel">
-  <h2>TRAINING LOG</h2>
-  <div class="log" id="log"></div>
+<div id="mainPage" class="page">
+<button onclick="logout()">Logout</button>
+<button onclick="showPage('createPage')">Write Story</button>
+<button onclick="showPage('profilePage')">Profile</button>
+<h4>Stories</h4>
+<div id="storyList"></div>
 </div>
 
-<div class="panel" id="preview-panel" style="display:none;">
-  <h2>GENERATED LEVEL — <span id="gen-name" style="color:#f9ca24;"></span></h2>
-  <div id="canvas-wrap"><canvas id="preview-canvas" height="140"></canvas></div>
-  <div style="margin-top:8px;font-size:9px;color:#445;" id="gen-stats"></div>
-  <div style="margin-top:8px;"><textarea id="gen-json" readonly></textarea></div>
+<div id="createPage" class="page">
+<button onclick="showPage('mainPage')">Back</button>
+<h4>Make Creepy Story</h4>
+<input type="text" id="storyTitle" placeholder="Title">
+<textarea id="storyText" rows="10" placeholder="Story text"></textarea>
+
+<select id="tag1">
+<option value="">Horror Level</option>
+<option value="#MildHorror">#MildHorror</option>
+<option value="#MediumHorror">#MediumHorror</option>
+<option value="#SevereHorror">#SevereHorror</option>
+</select>
+
+<select id="tag2">
+<option value="">Genre</option>
+<option value="#Paranormal">#Paranormal</option>
+<option value="#Metaphorical">#Metaphorical</option>
+<option value="#FirstPerson">#FirstPerson</option>
+<option value="#ThirdPerson">#ThirdPerson</option>
+<option value="#Occult">#Occult</option>
+<option value="#SciFi">#SciFi</option>
+<option value="#Supernatural">#Supernatural</option>
+<option value="#FoundFootage">#FoundFootage</option>
+<option value="#PlotTwist">#PlotTwist</option>
+<option value="#Nonsensical">#Nonsensical</option>
+<option value="#Mystery">#Mystery</option>
+<option value="#Nightmare">#Nightmare</option>
+<option value="#Derivative">#Derivative</option>
+</select>
+
+<select id="tag3">
+<option value="">Length</option>
+<option value="#ShortStory">#ShortStory</option>
+<option value="#MediumStory">#MediumStory</option>
+<option value="#LongStory">#LongStory</option>
+</select>
+
+<select id="tag4">
+<option value="">Style</option>
+<option value="#Cosmic">#Cosmic</option>
+<option value="#Gothic">#Gothic</option>
+<option value="#Bizarro">#Bizarro</option>
+<option value="#Epistolary">#Epistolary</option>
+<option value="#Crime">#Crime</option>
+<option value="#WebHorror">#WebHorror</option>
+</select>
+
+<select id="storyFont">
+<option value="arial">Arial</option>
+<option value="times new roman">Times New Roman</option>
+<option value="courier new">Courier New</option>
+</select>
+
+<input type="number" id="pageLength" placeholder="Page Height (px)" value="400">
+<input type="color" id="storyBg" value="#ffffff">
+<input type="color" id="storyTxt" value="#000000">
+
+<button onclick="postStory()">Post</button>
+</div>
+
+<div id="readPage" class="page">
+<button onclick="showPage('mainPage')">Back</button>
+<div id="readContent"></div>
+<h4>Rate</h4>
+<div id="ratingBox"></div>
+<button onclick="skipRating()">Skip</button>
+<h4>Comments</h4>
+<input type="text" id="commentInput" placeholder="Comment...">
+<button onclick="postComment()">Post Comment</button>
+<div id="commentList"></div>
+</div>
+
+<div id="profilePage" class="page">
+<button onclick="showPage('mainPage')">Back</button>
+<h4>Profile</h4>
+<input type="text" id="pfpUrl" placeholder="PFP Image URL">
+<input type="color" id="profileBg" value="#ffffff">
+<input type="text" id="bannerUrl" placeholder="Banner Image URL">
+<textarea id="bioText" placeholder="Bio"></textarea>
+<input type="text" id="statusText" placeholder="Status (lasts 1 hour)">
+<button onclick="saveProfile()">Save</button>
+<button onclick="deleteStatus()">Delete Status</button>
+<div id="profileDisplay"></div>
 </div>
 
 <script>
-// ── Firebase ──
-const fbCfg={
-  apiKey:"AIzaSyB9Rlvq49-AiLBzMDvjz71QCTT4d6NqE98",
-  authDomain:"mychat-28205.firebaseapp.com",
-  databaseURL:"https://mychat-28205-default-rtdb.firebaseio.com",
-  projectId:"mychat-28205",
-  storageBucket:"mychat-28205.firebasestorage.app",
-  messagingSenderId:"522121848657",
-  appId:"1:522121848657:web:7108993439310bf6da5570"
-};
-firebase.initializeApp(fbCfg);
-const db=firebase.database();
-
-// ── Constants ──
-const GROUND_Y=360;
-const BLOCK_TYPES=[
-  'block','spike','orb','plat','solidblock','pad',
-  'gravityorb','negorb','shipportal','waveportal',
-  'spiderportal','ballportal','trigger','glowblock',
-  'textblock','special'
-];
-const NT=BLOCK_TYPES.length; // 16 type classes
-
-// Version ranges per type (max version, 1 = no version)
-const TYPE_MAX_VERSION={
-  block:5, spike:4, orb:5, special:11,
+const firebaseConfig = {
+apiKey: "AIzaSyB111TO8XYZ2TGbNfwDcHw7GIVmziORwcI",
+authDomain: "socreepy-e5738.firebaseapp.com",
+projectId: "socreepy-e5738",
+storageBucket: "socreepy-e5738.firebasestorage.app",
+messagingSenderId: "399421809697",
+appId: "1:399421809697:web:e282057ab25bdb94bbaf60",
+measurementId: "G-QDL915B8JY"
 };
 
-// Text corpus for textblock generation (learned from levels)
-let textCorpus=[]; // array of words seen in training
-let wordFreq={};   // word → count
+firebase.initializeApp(firebaseConfig);
+const db = firebase.firestore();
 
-// ── Network dims ──
-// Input:  type_onehot(NT) + version_n + x_n + y_n + w_n + h_n + prev_type_onehot(NT) + prev_version_n = NT*2+6
-// Hidden: 96 → 48
-// Output: type_onehot(NT) + version_n + dx_n + dy_n + w_n + h_n = NT+5
-const IN=NT*2+7, H1=96, H2=48, OUT=NT+5; // IN: cur(type16,ver,y,w,h,dx)+prev(type16,ver,y)
+var currentUserData = null;
+var currentStoryId = null;
 
-let W1,b1,W2,b2,W3,b3;
-let trained=false;
-let genCount=0;
-let lastGenLevel=null;
-
-// ── Weight init ──
-function randn(scale){
-  const u=Math.random()||1e-10,v=Math.random()||1e-10;
-  return Math.sqrt(-2*Math.log(u))*Math.cos(2*Math.PI*v)*scale;
+if (localStorage.username) {
+db.collection("users").doc(localStorage.username).get().then(function(doc) {
+if (doc.exists) {
+currentUserData = doc.data();
+loadMain();
+} else {
+localStorage.removeItem("username");
 }
-function initWeights(){
-  const mk=(r,c,s)=>Array.from({length:r},()=>Array.from({length:c},()=>randn(s)));
-  W1=mk(H1,IN,Math.sqrt(2/IN));  b1=new Array(H1).fill(0);
-  W2=mk(H2,H1,Math.sqrt(2/H1));  b2=new Array(H2).fill(0);
-  W3=mk(OUT,H2,Math.sqrt(2/H2)); b3=new Array(OUT).fill(0);
-}
-
-// ── Activations ──
-const relu=x=>Math.max(0,x);
-const sig=x=>1/(1+Math.exp(-Math.min(Math.max(x,-20),20)));
-function softmax(arr){
-  const m=Math.max(...arr);
-  const e=arr.map(x=>Math.exp(x-m));
-  const s=e.reduce((a,b)=>a+b,0)||1;
-  return e.map(x=>x/s);
-}
-
-// ── Forward ──
-function matVec(M,v,b){return b.map((bi,i)=>bi+M[i].reduce((s,w,j)=>s+w*v[j],0));}
-function forward(inp){
-  const h1=matVec(W1,inp,b1).map(relu);
-  const h2=matVec(W2,h1,b2).map(relu);
-  const raw=matVec(W3,h2,b3);
-  return[...softmax(raw.slice(0,NT)),...raw.slice(NT).map(sig)];
-}
-
-// ── Encoding ──
-function oneHot(idx,n){const h=new Array(n).fill(0);h[Math.max(0,Math.min(idx,n-1))]=1;return h;}
-function typeIdx(t){const i=BLOCK_TYPES.indexOf(t);return i<0?0:i;}
-function versionNorm(o){return((o.version||1)-1)/10;} // 0..1 for versions 1-11
-
-function encodeSeq(cur,prev,prevPrev,maxX){
-  // Use GROUND_Y-relative y so "on the ground" always = 1.0
-  const yNorm=o=>Math.min(Math.max((GROUND_Y-(o.y||0)-(o.h||40))/GROUND_Y,0),1); // 0=top, 1=ground
-  const wNorm=o=>Math.min((o.w||40),400)/400;
-  const hNorm=o=>Math.min((o.h||40),400)/400;
-  // dx from prev in fixed units (0=same x, 1=600px gap)
-  const dxNorm=prev?Math.min(Math.max(((cur.x||0)-(prev.x||0))/600,0),1):0.15;
-  return[
-    ...oneHot(typeIdx(cur.t),NT),
-    versionNorm(cur),
-    yNorm(cur),
-    wNorm(cur),
-    hNorm(cur),
-    dxNorm,
-    ...oneHot(typeIdx(prev?prev.t:'block'),NT),
-    prev?versionNorm(prev):0,
-    prev?yNorm(prev):0.0, // prev y position
-  ];
-}
-function encodeTarget(cur,prev,maxX){
-  const yNorm=o=>Math.min(Math.max((GROUND_Y-(o.y||0)-(o.h||40))/GROUND_Y,0),1);
-  const dx=prev?Math.min(Math.max(((cur.x||0)-(prev.x||0))/600,0),1):0.15;
-  return[
-    ...oneHot(typeIdx(cur.t),NT),
-    versionNorm(cur),
-    yNorm(cur),       // target y (ground-relative, consistent across all levels)
-    Math.min(Math.max(dx,0),1), // target dx (gap to next object)
-    Math.min((cur.w||40),400)/400,
-    Math.min((cur.h||40),400)/400
-  ];
-}
-
-// ── Learn text from levels ──
-function learnText(levels){
-  wordFreq={};
-  for(const lv of levels){
-    for(const o of (lv.obs||[])){
-      if(o.t==='textblock'&&o.text){
-        o.text.split(/\s+/).forEach(w=>{
-          const wc=w.trim().toLowerCase();
-          if(wc.length>0) wordFreq[wc]=(wordFreq[wc]||0)+1;
-        });
-      }
-    }
-  }
-  // Build weighted corpus
-  textCorpus=[];
-  Object.entries(wordFreq).forEach(([w,n])=>{
-    for(let i=0;i<Math.min(n,5);i++) textCorpus.push(w);
-  });
-  if(!textCorpus.length) textCorpus=['hello','world','jump','dodge','run','go','nice','level','cool','wow'];
-  log('Text corpus: '+Object.keys(wordFreq).length+' unique words learned.','accent');
-}
-
-function generateText(temp){
-  // Pick 2-6 words from corpus with temperature-based randomness
-  const count=2+Math.floor(Math.random()*4);
-  const words=[];
-  for(let i=0;i<count;i++){
-    const idx=Math.floor(Math.random()*textCorpus.length);
-    words.push(textCorpus[idx]);
-  }
-  // Capitalize first word
-  if(words.length) words[0]=words[0][0].toUpperCase()+words[0].slice(1);
-  return words.join(' ');
-}
-
-
-// ── Build training data ──
-function buildData(levels){
-  const inputs=[],targets=[];
-  learnText(levels);
-  for(const lv of levels){
-    const obs=(lv.obs||[])
-      .filter(o=>BLOCK_TYPES.includes(o.t)) // coin not in list → auto-filtered
-      .sort((a,b)=>(a.x||0)-(b.x||0));
-    if(obs.length<3)continue;
-    const maxX=Math.max(...obs.map(o=>o.x||0),800);
-    for(let i=1;i<obs.length;i++){
-      const inp=encodeSeq(obs[i-1],i>=2?obs[i-2]:null,null,maxX);
-      const tgt=encodeTarget(obs[i],obs[i-1],maxX);
-      if(inp.length===IN&&tgt.length===OUT){inputs.push(inp);targets.push(tgt);}
-    }
-  }
-  return{inputs,targets};
-}
-
-// ── Backprop / SGD ──
-const CLIP=2.0; // gradient clipping threshold
-function clipGrad(g){return Math.max(-CLIP,Math.min(CLIP,g));}
-function safeNum(x){return isFinite(x)?x:0;}
-
-function trainBatch(bIn,bTgt,lr){
-  const n=bIn.length;
-  const dW1=W1.map(r=>r.map(()=>0)),db1_=b1.map(()=>0);
-  const dW2=W2.map(r=>r.map(()=>0)),db2_=b2.map(()=>0);
-  const dW3=W3.map(r=>r.map(()=>0)),db3_=b3.map(()=>0);
-  let totalLoss=0,skipped=0;
-
-  for(let s=0;s<n;s++){
-    const inp=bIn[s],tgt=bTgt[s];
-    // Forward
-    const z1=matVec(W1,inp,b1),h1=z1.map(relu);
-    const z2=matVec(W2,h1,b2),h2=z2.map(relu);
-    const raw=matVec(W3,h2,b3);
-    // NaN guard — skip corrupted samples
-    if(raw.some(v=>!isFinite(v))){skipped++;continue;}
-    const typeP=softmax(raw.slice(0,NT));
-    const restS=raw.slice(NT).map(sig);
-    const out=[...typeP,...restS];
-    // Cross-entropy loss for type head + MSE for continuous outputs
-    const tIdx=tgt.slice(0,NT).indexOf(1); // true type index
-    const ceLoss=-(Math.log(Math.max(typeP[tIdx],1e-9)));
-    const mseLoss=restS.reduce((a,v,i)=>a+(v-tgt[NT+i])*(v-tgt[NT+i]),0)/restS.length;
-    const sampleLoss=ceLoss+mseLoss;
-    if(!isFinite(sampleLoss)){skipped++;continue;}
-    totalLoss+=sampleLoss;
-    // dZ3: softmax+CE gradient = (p - onehot) for type head (clean closed form)
-    const dZ3=new Array(OUT).fill(0);
-    for(let j=0;j<NT;j++) dZ3[j]=clipGrad(typeP[j]-(j===tIdx?1:0));
-    // sigmoid+MSE gradient for continuous outputs
-    for(let i=NT;i<OUT;i++){const sv=restS[i-NT];dZ3[i]=clipGrad(2*(sv-tgt[i])/restS.length*sv*(1-sv));}
-    // W3/b3 grads
-    for(let i=0;i<OUT;i++){db3_[i]+=dZ3[i];for(let j=0;j<H2;j++)dW3[i][j]+=clipGrad(dZ3[i]*h2[j]);}
-    // dH2 → dZ2
-    const dH2=new Array(H2).fill(0);
-    for(let j=0;j<H2;j++) for(let i=0;i<OUT;i++) dH2[j]+=dZ3[i]*W3[i][j];
-    const dZ2=dH2.map((d,j)=>z2[j]>0?clipGrad(d):0);
-    for(let i=0;i<H2;i++){db2_[i]+=dZ2[i];for(let j=0;j<H1;j++)dW2[i][j]+=clipGrad(dZ2[i]*h1[j]);}
-    // dH1 → dZ1
-    const dH1=new Array(H1).fill(0);
-    for(let j=0;j<H1;j++) for(let i=0;i<H2;i++) dH1[j]+=dZ2[i]*W2[i][j];
-    const dZ1=dH1.map((d,j)=>z1[j]>0?clipGrad(d):0);
-    for(let i=0;i<H1;i++){db1_[i]+=dZ1[i];for(let j=0;j<IN;j++)dW1[i][j]+=clipGrad(dZ1[i]*inp[j]);}
-  }
-
-  const valid=n-skipped||1;
-  // Apply gradients (Adam-lite: just scale by 1/valid)
-  for(let i=0;i<H1;i++){b1[i]=safeNum(b1[i]-lr*db1_[i]/valid);for(let j=0;j<IN;j++)W1[i][j]=safeNum(W1[i][j]-lr*dW1[i][j]/valid);}
-  for(let i=0;i<H2;i++){b2[i]=safeNum(b2[i]-lr*db2_[i]/valid);for(let j=0;j<H1;j++)W2[i][j]=safeNum(W2[i][j]-lr*dW2[i][j]/valid);}
-  for(let i=0;i<OUT;i++){b3[i]=safeNum(b3[i]-lr*db3_[i]/valid);for(let j=0;j<H2;j++)W3[i][j]=safeNum(W3[i][j]-lr*dW3[i][j]/valid);}
-  return safeNum(totalLoss/valid);
-}
-
-// ── Weight persistence (Firebase) ──
-async function saveWeights(){
-  log('Saving model weights to Firebase...','accent');
-  const model={
-    W1,b1,W2,b2,W3,b3,
-    savedAt:Date.now(),
-    epochs:parseInt(document.getElementById('s-epochs').textContent)||0
-  };
-  // Serialize as flat arrays to keep Firebase happy
-  const clean=v=>isFinite(v)?v:0; // strip any surviving NaN/Inf
-  const flat={
-    W1:W1.map(r=>r.map(clean)),b1:b1.map(clean),
-    W2:W2.map(r=>r.map(clean)),b2:b2.map(clean),
-    W3:W3.map(r=>r.map(clean)),b3:b3.map(clean),
-    savedAt:model.savedAt,epochs:model.epochs
-  };
-  try{
-    await db.ref('claredash_nn_weights').set(flat);
-    // Also save text corpus
-    if(Object.keys(wordFreq).length>0){
-      // Store as JSON string to avoid Firebase key character restrictions
-      await db.ref('claredash_nn_text').set({corpus:JSON.stringify(wordFreq)});
-    }
-    log('✓ Weights + text corpus saved to Firebase (shared with all users).','good');
-  }catch(e){
-    log('Failed to save weights: '+e.message,'warn');
-  }
-}
-
-async function loadWeights(){
-  log('Loading shared model weights from Firebase...','accent');
-  try{
-    const snap=await db.ref('claredash_nn_weights').once('value');
-    if(!snap.exists()){log('No saved weights found. Restarting.','info');initWeights();return false;}
-    const d=snap.val();
-    // Shape validation — if architecture changed, saved weights are incompatible
-    const shapeOk = d.W1&&d.W1.length===H1&&d.W1[0]&&d.W1[0].length===IN
-                 && d.W2&&d.W2.length===H2&&d.W2[0]&&d.W2[0].length===H1
-                 && d.W3&&d.W3.length===OUT&&d.W3[0]&&d.W3[0].length===H2
-                 && d.b1&&d.b1.length===H1
-                 && d.b2&&d.b2.length===H2
-                 && d.b3&&d.b3.length===OUT;
-    if(!shapeOk){
-      log('Saved weights have wrong shape. Clearing all logs.','warn');
-      initWeights();
-      // Wipe the stale weights so next save stores the correct shape
-      await db.ref('claredash_nn_weights').remove();
-      return false;
-    }
-    W1=d.W1;b1=d.b1;
-    W2=d.W2;b2=d.b2;
-    W3=d.W3;b3=d.b3;
-    // Sanitize loaded weights just in case
-    const cl=v=>isFinite(v)?v:0;
-    W1=W1.map(r=>r.map(cl));W2=W2.map(r=>r.map(cl));W3=W3.map(r=>r.map(cl));
-    b1=b1.map(cl);b2=b2.map(cl);b3=b3.map(cl);
-    trained=true;
-    const savedDate=d.savedAt?new Date(d.savedAt).toLocaleString():'unknown';
-    document.getElementById('s-epochs').textContent=d.epochs||'?';
-    document.getElementById('s-time').textContent=new Date(d.savedAt||Date.now()).toLocaleTimeString();
-    document.getElementById('btn-gen').disabled=false;
-    // Also load text corpus
-    try{
-      const tsnap=await db.ref('claredash_nn_text').once('value');
-      if(tsnap.exists()){
-        const raw=tsnap.val();
-        wordFreq=raw.corpus?JSON.parse(raw.corpus):raw;
-        textCorpus=[];
-        Object.entries(wordFreq).forEach(([w,n])=>{for(let i=0;i<Math.min(n,5);i++)textCorpus.push(w);});
-        log('✓ Text corpus loaded: '+Object.keys(wordFreq).length+' words.','good');
-      }
-    }catch(e){log('Text corpus load failed (non-critical): '+e.message,'info');}
-    log('✓ Loaded existing model (saved '+savedDate+', epochs: '+(d.epochs||'?')+').','good');
-    return true;
-  }catch(e){
-    log('Failed to load weights: '+e.message+' — starting fresh.','warn');
-    initWeights();return false;
-  }
-}
-
-// Debounced weight save (save at end of training, not mid-batch)
-let _saveTimer=null;
-function scheduleSave(){
-  if(_saveTimer)clearTimeout(_saveTimer);
-  _saveTimer=setTimeout(saveWeights,500);
-}
-
-function log(msg,cls='info'){
-  const el=document.getElementById('log');
-  const d=document.createElement('div');d.className=cls;
-  d.textContent='['+new Date().toLocaleTimeString()+'] '+msg;
-  el.appendChild(d);el.scrollTop=el.scrollHeight;
-}
-
-// ── Main train flow ──
-let isTraining=false;
-async function trainNow(){
-  if(isTraining){log('Already training — please wait.','warn');return;}
-  isTraining=true;
-  document.getElementById('btn-train').disabled=true;
-  document.getElementById('btn-train').textContent='Training...';
-
-  // Fetch
-  log('Fetching levels from Firebase...','accent');
-  const snap=await db.ref('claredash_levels').once('value');
-  const levels=[];
-  snap.forEach(c=>{const v=c.val();if(v&&v.obs&&v.obs.length>3)levels.push(v);});
-  log('Loaded '+levels.length+' levels.','good');
-  document.getElementById('s-levels').textContent=levels.length;
-  if(!levels.length){log('No levels to train on.','warn');isTraining=false;document.getElementById('btn-train').disabled=false;document.getElementById('btn-train').textContent='⚡ Train Now';return;}
-
-  const {inputs,targets}=buildData(levels);
-  log('Built '+inputs.length+' training sequences.','accent');
-  document.getElementById('s-objects').textContent=inputs.length;
-  if(!inputs.length){log('Not enough data.','warn');isTraining=false;document.getElementById('btn-train').disabled=false;document.getElementById('btn-train').textContent='⚡ Train Now';return;}
-
-  if(!trained)initWeights();
-
-  const EPOCHS=300,BATCH=32;
-  let lr=0.008;
-  log('Training '+EPOCHS+' epochs ('+H1+'-'+H2+' hidden, '+inputs.length+' pairs)...','accent');
-
-  // Yield every epoch so the browser stays responsive and CPU stays cool
-  for(let ep=0;ep<EPOCHS;ep++){
-    const idx=[...Array(inputs.length).keys()].sort(()=>Math.random()-0.5);
-    let el=0,eb=0;
-    for(let b=0;b<idx.length;b+=BATCH){
-      const bi=idx.slice(b,b+BATCH);
-      el+=trainBatch(bi.map(i=>inputs[i]),bi.map(i=>targets[i]),lr);
-      eb++;
-    }
-    const avgLoss=el/(eb||1);
-    if((ep+1)%100===0)lr*=0.75;
-    document.getElementById('prog').style.width=((ep+1)/EPOCHS*100)+'%';
-    document.getElementById('s-epochs').textContent=ep+1;
-    document.getElementById('s-loss').textContent=isFinite(avgLoss)?avgLoss.toFixed(4):'NaN (recovering)';
-    if((ep+1)%25===0||ep===0){
-      log('Epoch '+(ep+1)+'/'+EPOCHS+' — loss: '+avgLoss.toFixed(4),(avgLoss<0.04?'good':'info'));
-    }
-    // Yield every epoch — keeps browser alive and prevents CPU meltdown
-    await new Promise(r=>setTimeout(r,8));
-  }
-
-  trained=true;
-  document.getElementById('s-time').textContent=new Date().toLocaleTimeString();
-  document.getElementById('btn-gen').disabled=false;
-  document.getElementById('btn-train').disabled=false;
-  document.getElementById('btn-train').textContent='⚡ Train Now';
-  log('✓ Training complete! Click "Generate Level" to create a level.','good');
-  isTraining=false;
-  // Save updated weights so all users benefit
-  await saveWeights();
-}
-
-// ── Generation ──
-function tempSample(probs,temp){
-  const logits=probs.map(p=>Math.log((p||1e-9))/temp);
-  return softmax(logits);
-}
-function pick(probs){let r=Math.random(),a=0;for(let i=0;i<probs.length;i++){a+=probs[i];if(r<=a)return i;}return probs.length-1;}
-
-function generateLevel(){
-  if(!trained){log('Train the network first!','warn');return;}
-  const temp=parseFloat(document.getElementById('temp-val').textContent)||0.4;
-  const len=parseInt(document.getElementById('len-val').textContent)||28;
-  log('Generating level (creativity='+temp+', length='+len+')...','gen');
-
-  const GH=GROUND_Y; // ground Y = 360
-  const JUMP_H=50;   // default jump height
-  // Approximate max jump arc height in pixels at jumpHeight=50
-  const MAX_JUMP_RISE=110;
-  const MAX_JUMP_DIST=220; // px of horizontal travel during a full jump
-
-  // ── NN picks type, rules handle placement ──
-  // Type budget: what types are "interesting" vs filler
-  const FILLER=['block','solidblock','plat'];
-  const AERIAL=['orb','gravityorb','negorb','pad'];
-  const PORTAL=['shipportal','waveportal','spiderportal','ballportal'];
-  const HAZARD=['spike'];
-
-  // Budget: portals rare, hazards common, aerial moderate
-  // NN probabilities are suppressed/boosted here
-  const TYPE_MULT={
-    block:1.4, solidblock:0.6, plat:1.2,
-    spike:1.5, pad:1.0, orb:1.2,
-    gravityorb:0.3, negorb:0.4,
-    shipportal:0.12, waveportal:0.12, spiderportal:0.08, ballportal:0.08,
-    trigger:0.04, textblock:0.04, glowblock:0.3, special:0.15
-  };
-
-  const rnd=(a,b)=>a+Math.random()*(b-a);
-  const obs=[];
-  obs.push({t:'startblock',x:80,y:GH-40,w:40,h:40,touchable:true});
-
-  let curX=200;
-  let textBlockCount=0;
-  let portalActive=null;   // null | 'ship' | 'wave' | 'spider' | 'ball'
-  let portalEndX=0;        // when to "end" the portal section
-  let spawnedPortal=false; // only one portal section per level
-
-  // Helper: pick type via NN + rules
-  function pickType(lastObj){
-    const prev2=obs.length>=2?obs[obs.length-2]:null;
-    const inp=encodeSeq(lastObj,prev2,null,4000);
-    const out=forward(inp);
-    let tProbs=tempSample(out.slice(0,NT),temp);
-
-    // Apply multipliers
-    Object.entries(TYPE_MULT).forEach(([t,m])=>{
-      const i=typeIdx(t);if(i>=0)tProbs[i]*=m;
-    });
-
-    // Textblock cap
-    const tbIdx=typeIdx('textblock');
-    tProbs[tbIdx]=textBlockCount>=3?0:tProbs[tbIdx]*0.05;
-
-    // Only one portal section — after one is placed, zero all portals
-    if(spawnedPortal){
-      ['shipportal','waveportal','spiderportal','ballportal'].forEach(t=>{
-        const i=typeIdx(t);if(i>=0)tProbs[i]=0;
-      });
-    }
-
-    // Normalise and pick
-    const s=tProbs.reduce((a,b)=>a+b,0);
-    tProbs=tProbs.map(p=>p/s);
-    return BLOCK_TYPES[pick(tProbs)];
-  }
-
-  // Helper: version for versioned types
-  function pickVersion(t, nnOut){
-    const maxV=TYPE_MAX_VERSION[t]||1;
-    if(maxV<=1)return undefined;
-    const vRaw=nnOut[NT];
-    return Math.max(1,Math.min(maxV,Math.round(vRaw*(maxV-1)+1)));
-  }
-
-  // ── PLACEMENT RULES ──
-  // Returns {x, y, w, h} for each type with physically correct placement
-  function placeObject(t, curX, lastObj){
-    const r=()=>(Math.random()-0.5)*2; // -1..1
-
-    if(t==='block'||t==='solidblock'){
-      const w=Math.round(rnd(40,160)/40)*40;  // snap to 40px grid
-      const h=Math.round(rnd(40,120)/40)*40;
-      // 60% sit on ground, 40% elevated (must be reachable)
-      const onGround=Math.random()<0.6;
-      const y=onGround?(GH-h):Math.max(GH-h-MAX_JUMP_RISE*0.8, 40);
-      const gap=Math.round(rnd(60,180)/40)*40;
-      return{x:curX+gap,y,w,h};
-    }
-
-    if(t==='plat'){
-      const w=Math.round(rnd(80,200)/40)*40;
-      const h=14;
-      // Platforms always elevated and reachable
-      const y=Math.round(rnd(GH-MAX_JUMP_RISE*0.9, GH-80)/10)*10;
-      const gap=Math.round(rnd(80,160)/40)*40;
-      return{x:curX+gap,y,w,h};
-    }
-
-    if(t==='spike'){
-      const w=28;const h=28;
-      // Spikes sit on ground or on top of the last block
-      const onLastBlock=lastObj&&(lastObj.t==='block'||lastObj.t==='solidblock')&&Math.random()<0.4;
-      const y=onLastBlock?(lastObj.y-h):(GH-h);
-      const x=onLastBlock?lastObj.x+Math.round(rnd(0,lastObj.w-w)):curX+Math.round(rnd(40,120));
-      return{x,y,w,h};
-    }
-
-    if(t==='pad'){
-      const w=40;const h=18;
-      const y=GH-h;  // pads always on ground
-      return{x:curX+Math.round(rnd(60,140)),y,w,h};
-    }
-
-    if(t==='orb'||t==='gravityorb'||t==='negorb'){
-      const w=28;const h=28;
-      // Orbs float at jump height — must be over a gap or block
-      const floatY=Math.round(rnd(GH-MAX_JUMP_RISE*0.5, GH-MAX_JUMP_RISE*0.9)/10)*10;
-      return{x:curX+Math.round(rnd(80,200)),y:floatY,w,h};
-    }
-
-    if(t==='shipportal'||t==='waveportal'||t==='spiderportal'||t==='ballportal'){
-      const w=40;const h=80;
-      const y=GH-h;
-      return{x:curX+Math.round(rnd(80,160)),y,w,h};
-    }
-
-    if(t==='textblock'){
-      // Float near top of screen, never on ground
-      const y=Math.round(rnd(10,80));
-      return{x:curX+Math.round(rnd(60,200)),y,w:20,h:20};
-    }
-
-    if(t==='glowblock'){
-      const w=Math.round(rnd(80,200)/40)*40;
-      const h=Math.round(rnd(60,160)/40)*40;
-      const y=Math.round(rnd(0,GH-h));
-      return{x:curX+Math.round(rnd(60,160)),y,w,h};
-    }
-
-    if(t==='trigger'){
-      return{x:curX+Math.round(rnd(100,300)),y:0,w:8,h:GH};
-    }
-
-    if(t==='special'){
-      const w=40;const h=40;
-      const y=GH-h;
-      return{x:curX+Math.round(rnd(80,160)),y,w,h};
-    }
-
-    // default
-    const w=40;const h=40;
-    return{x:curX+Math.round(rnd(60,160)),y:GH-h,w,h};
-  }
-
-  // ── MAIN GENERATION LOOP ──
-  for(let i=0;i<len;i++){
-    const lastObj=obs[obs.length-1];
-
-    // If inside a portal section, mostly place clearance blocks or nothing
-    if(portalActive&&curX<portalEndX){
-      // During portal: place some elevated platforms/orbs for the mode, no ground spikes
-      const roll=Math.random();
-      if(roll<0.4){
-        // floating platform
-        const w=Math.round(80+Math.random()*80);
-        const y=Math.round(GH-60-Math.random()*140);
-        obs.push({t:'plat',x:Math.round(curX+80+Math.random()*80),y,w,h:14,touchable:true,bounce:50});
-      } else if(roll<0.65&&(portalActive==='ship'||portalActive==='wave')){
-        // floating block obstacle — gives ship/wave something to dodge
-        const w=40;const h=40+Math.round(Math.random()*80);
-        const y=Math.round(Math.random()<0.5?0:GH-h-80-Math.random()*80);
-        obs.push({t:'block',x:Math.round(curX+80+Math.random()*100),y,w,h,touchable:true,bounce:50});
-      }
-      curX+=Math.round(120+Math.random()*80);
-      continue;
-    }
-
-    // Normal section: pick type from NN
-    let t=pickType(lastObj);
-
-    // Get NN output for version
-    const prev2=obs.length>=2?obs[obs.length-2]:null;
-    const nnOut=forward(encodeSeq(lastObj,prev2,null,4000));
-
-    // Get placement
-    const pos=placeObject(t,curX,lastObj);
-    curX=pos.x; // advance curX to placed x
-
-    // Build object
-    const obj={t,x:pos.x,y:pos.y,w:pos.w,h:pos.h,touchable:true,bounce:50};
-
-    // Version
-    const v=pickVersion(t,nnOut);
-    if(v!==undefined)obj.version=v;
-
-    // Type-specific fixups
-    if(t==='textblock'){
-      if(textBlockCount>=3){
-        // demote to block on ground
-        obj.t='block';obj.y=GH-obj.h;obj.touchable=true;
-      } else {
-        obj.text=generateText(temp);
-        obj.textSize=Math.round(14+Math.random()*20);
-        obj.touchable=false;
-        textBlockCount++;
-      }
-    }
-
-    if(t==='pad'){obj.touchable=true;}
-    if(t==='orb'||t==='gravityorb'||t==='negorb'){obj.touchable=false;}
-    if(t==='glowblock'){obj.touchable=false;obj.glowColor1='#'+Math.floor(Math.random()*0xffffff).toString(16).padStart(6,'0');obj.glowColor2='#'+Math.floor(Math.random()*0xffffff).toString(16).padStart(6,'0');obj.glowAlpha1=80+Math.round(Math.random()*20);obj.glowAlpha2=0;obj.glowDir=['horizontal','vertical','diagonal','radial'][Math.floor(Math.random()*4)];}
-    if(t==='trigger'){obj.touchable=false;obj.trigSpeed=Math.round(rnd(3,7)*10)/10;obj.trigJump=Math.round(rnd(30,80));}
-
-    // Portal: start a portal section
-    if(t==='shipportal'||t==='waveportal'||t==='spiderportal'||t==='ballportal'){
-      if(!spawnedPortal){
-        spawnedPortal=true;
-        portalActive=t.replace('portal','');
-        // Portal section lasts 4-8 "steps" worth of space
-        portalEndX=curX+Math.round(400+Math.random()*400);
-        // Place a blockportal at the end to exit
-        const exitX=Math.round(portalEndX+80);
-        obs.push(obj); // push portal first
-        obs.push({t:'blockportal',x:exitX,y:GH-80,w:40,h:80,touchable:true,bounce:50});
-        curX=exitX+80;
-        portalActive=null; // handled inline above
-        continue;
-      } else {
-        // Already had a portal — demote to block
-        obj.t='block';obj.y=GH-obj.h;obj.w=40;obj.h=40;obj.touchable=true;
-      }
-    }
-
-    obs.push(obj);
-  }
-
-  obs.push({t:'endblock',x:curX+240,y:GH-40,w:40,h:40,touchable:true});
-
-  genCount++;
-  const name='AI Level #'+genCount;
-  lastGenLevel={
-    name,author:'__nn__',obs,
-    speed:4,jumpHeight:50,
-    bgColor:'#1a1a2e',groundColor:'#252545',
-    created:Date.now(),private:false,sharedWith:[],aiGenerated:true
-  };
-
-  document.getElementById('s-gens').textContent=genCount;
-  document.getElementById('btn-save').disabled=false;
-  document.getElementById('gen-name').textContent=name;
-
-  const tc={};obs.forEach(o=>{tc[o.t]=(tc[o.t]||0)+1;});
-  document.getElementById('gen-stats').textContent=
-    obs.length+' objects — '+Object.entries(tc).map(([k,v])=>k+'×'+v).join('  ');
-
-  document.getElementById('gen-json').value=JSON.stringify(lastGenLevel,null,2);
-  document.getElementById('preview-panel').style.display='';
-  renderPreview(obs);
-
-  log('Generated "'+name+'" with '+obs.length+' objects.','gen');
-}
-
-// ── Preview render ──
-const PREV_COLORS={
-  block:'#2a2a5a',spike:'#dd3333',orb:'rgba(255,220,0,0.9)',
-  plat:'#5555aa',solidblock:'#cccccc',pad:'#22cc77',
-  gravityorb:'#ff4444',negorb:'#8844ff',
-  shipportal:'#ffcc00',waveportal:'#00ccff',spiderportal:'#cc44ff',
-  ballportal:'#44ffaa',trigger:'#e8a000',glowblock:'#ff6688',
-  textblock:'rgba(255,255,255,0.06)',special:'rgba(200,200,255,0.85)',
-  startblock:'rgba(46,213,115,0.5)',endblock:'rgba(232,255,0,0.5)'
-};
-
-function renderPreview(obs){
-  const canvas=document.getElementById('preview-canvas');
-  const wrap=document.getElementById('canvas-wrap');
-  const maxWorldX=Math.max(...obs.map(o=>(o.x||0)+(o.w||40)))+80;
-  canvas.width=Math.min(maxWorldX, wrap.offsetWidth||800);
-  const SCALE=canvas.height/GROUND_Y;
-  const ctx=canvas.getContext('2d');
-
-  ctx.fillStyle='#1a1a2e';ctx.fillRect(0,0,canvas.width,canvas.height);
-  ctx.fillStyle='#252545';ctx.fillRect(0,GROUND_Y*SCALE,canvas.width,20);
-
-  obs.forEach(o=>{
-    const x=o.x||0,y=(o.y||0)*SCALE,w=o.w||40,h=(o.h||40)*SCALE;
-    const col=PREV_COLORS[o.t]||'#888';
-    ctx.fillStyle=col;
-
-    if(o.t==='textblock'){
-      ctx.strokeStyle='rgba(255,255,255,0.25)';ctx.lineWidth=1;
-      ctx.strokeRect(x,y,w,h);ctx.fillRect(x,y,w,h);
-      ctx.fillStyle='rgba(255,255,255,0.85)';
-      const fs=Math.max(6,Math.min(11,h*0.35));
-      ctx.font=fs+'px monospace';ctx.textAlign='center';
-      const txt=o.text||'';
-      ctx.fillText(txt.length>14?txt.slice(0,13)+'\u2026':txt,x+w/2,y+h/2+fs*0.35);
-    } else if(o.t==='special'){
-      ctx.beginPath();ctx.arc(x+w/2,y+h/2,Math.min(w,h)/2,0,Math.PI*2);ctx.fill();
-      ctx.fillStyle='rgba(0,0,0,0.55)';ctx.font='6px monospace';ctx.textAlign='center';
-      ctx.fillText('sp'+(o.version||1),x+w/2,y+h/2+2);
-    } else if(o.t==='orb'||o.t==='gravityorb'||o.t==='negorb'){
-      ctx.beginPath();ctx.arc(x+w/2,y+h/2,Math.min(w,h)/2,0,Math.PI*2);ctx.fill();
-      if(o.version&&o.version>1){ctx.fillStyle='rgba(0,0,0,0.5)';ctx.font='6px monospace';ctx.textAlign='center';ctx.fillText('v'+o.version,x+w/2,y+h/2+2);}
-    } else if(o.t==='spike'){
-      ctx.beginPath();ctx.moveTo(x+w/2,y);ctx.lineTo(x+w,y+h);ctx.lineTo(x,y+h);ctx.closePath();ctx.fill();
-      if(o.version&&o.version>1){ctx.fillStyle='rgba(255,255,255,0.6)';ctx.font='6px monospace';ctx.textAlign='center';ctx.fillText('v'+o.version,x+w/2,y+h*0.75);}
-    } else {
-      ctx.fillRect(x,y,w,h);
-      ctx.fillStyle='rgba(255,255,255,0.4)';ctx.font='6px monospace';ctx.textAlign='center';
-      const sn=o.t.replace('block','').replace('portal','p').replace('solid','sol');
-      const lbl=o.version&&o.version>1?sn+' v'+o.version:sn;
-      ctx.fillText(lbl,x+w/2,y+h/2+2);
-    }
-  });
-}
-
-// ── Save to Firebase ──
-async function saveToFirebase(){
-  if(!lastGenLevel){log('Generate a level first!','warn');return;}
-  document.getElementById('btn-save').disabled=true;
-  log('Saving "'+lastGenLevel.name+'" to ClareDash...','accent');
-  try{
-    await db.ref('claredash_levels').push(lastGenLevel);
-    log('✓ Saved! Level now appears in ClareDash Play tab.','good');
-  }catch(e){
-    log('Save failed: '+e.message,'warn');
-    document.getElementById('btn-save').disabled=false;
-  }
-}
-
-// ── Init ──
-initWeights(); // set default structure in case load fails
-log('Network architecture: '+IN+'→'+H1+'→'+H2+'→'+OUT,'accent');
-log('Loading shared model from Firebase...','info');
-loadWeights().then(loaded=>{
-  if(!loaded) log('No prior training found. Click ⚡ Train Now to begin.','info');
 });
-
-// ── Continuous background learning ──
-// Runs a few epochs at a time with long pauses, so the model keeps improving while idle.
-let _bgPairs=null;   // cached training data
-let _bgCycle=0;      // bg cycles completed
-let _bgLR=0.004;     // slow LR for background passes
-let _bgRunning=false;
-
-async function bgLearnCycle(){
-  if(isTraining||_bgRunning)return; // never overlap with manual train
-  _bgRunning=true;
-  try{
-    // Refresh data every 10 cycles to pick up new levels
-    if(!_bgPairs||_bgCycle%10===0){
-      const snap=await db.ref('claredash_levels').once('value');
-      const levels=[];
-      snap.forEach(c=>{const v=c.val();if(v&&v.obs&&v.obs.length>3)levels.push(v);});
-      if(levels.length){
-        const d=buildData(levels);
-        if(d.inputs.length){
-          _bgPairs=d;
-          document.getElementById('s-levels').textContent=levels.length;
-          document.getElementById('s-objects').textContent=d.inputs.length;
-        }
-      }
-    }
-    if(!_bgPairs||!_bgPairs.inputs.length){_bgRunning=false;return;}
-
-    // 5 epochs, slow yield between each batch
-    const EPOCHS=5,BATCH=32;
-    const {inputs,targets}=_bgPairs;
-    let totalLoss=0,batches=0;
-    for(let ep=0;ep<EPOCHS;ep++){
-      const idx=[...Array(inputs.length).keys()].sort(()=>Math.random()-0.5);
-      for(let b=0;b<idx.length;b+=BATCH){
-        const bi=idx.slice(b,b+BATCH);
-        totalLoss+=trainBatch(bi.map(i=>inputs[i]),bi.map(i=>targets[i]),_bgLR);
-        batches++;
-        await new Promise(r=>setTimeout(r,14)); // long yield = cool CPU
-      }
-      await new Promise(r=>setTimeout(r,60));
-    }
-
-    const avgLoss=totalLoss/(batches||1);
-    _bgCycle++;
-    trained=true;
-    document.getElementById('btn-gen').disabled=false;
-    _bgLR=Math.max(0.0005,_bgLR*0.997); // slow decay, floor at 0.0005
-    document.getElementById('s-epochs').textContent='bg×'+_bgCycle;
-    document.getElementById('s-loss').textContent=isFinite(avgLoss)?avgLoss.toFixed(4):'--';
-    document.getElementById('s-time').textContent=new Date().toLocaleTimeString()+' (bg)';
-
-    // Save to Firebase every 5 cycles
-    if(_bgCycle%5===0){
-      await saveWeights();
-      log('💾 Background save — cycle '+_bgCycle+', loss: '+avgLoss.toFixed(4),'accent');
-    }
-  }catch(e){
-    console.warn('bgLearn error:',e);
-  }
-  _bgRunning=false;
 }
 
-// Start 8s after load (let weights load first), then every 90s
-setTimeout(()=>{
-  log('🧠 Background learning active — model improves while you wait.','accent');
-  bgLearnCycle();
-  setInterval(bgLearnCycle,90000);
-},8000);
+function showPage(id) {
+var pages = document.getElementsByClassName("page");
+for (var i = 0; i < pages.length; i++) {
+pages[i].style.display = "none";
+}
+document.getElementById(id).style.display = "block";
+if (id === "mainPage") {
+loadStories();
+}
+if (id === "profilePage") {
+loadProfile();
+}
+}
+
+function login() {
+var username = document.getElementById("nameIn").value;
+var password = document.getElementById("passIn").value;
+db.collection("users").doc(username).get().then(function(doc) {
+if (doc.exists && doc.data().pass === btoa(password)) {
+localStorage.username = username;
+currentUserData = doc.data();
+loadMain();
+} else {
+alert("wrong name or pass");
+}
+});
+}
+
+function signup() {
+var username = document.getElementById("nameIn2").value;
+var password = document.getElementById("passIn2").value;
+var validUser = /^[a-zA-Z0-9_]+$/.test(username);
+if (!validUser || username.length < 1) {
+alert("Bad username");
+return;
+}
+if (!password) {
+alert("need password");
+return;
+}
+db.collection("users").doc(username).get().then(function(doc) {
+if (doc.exists) {
+alert("name taken");
+} else {
+var role = "user";
+if (username === "bartelsfamily5") {
+role = "admin";
+}
+db.collection("users").doc(username).set({
+username: username,
+role: role,
+pass: btoa(password),
+pfp: "",
+profileBg: "#ffffff",
+banner: "",
+bio: "",
+status: "",
+statusTime: 0
+}).then(function() {
+localStorage.username = username;
+currentUserData = { username: username, role: role, pass: btoa(password), pfp: "", profileBg: "#ffffff", banner: "", bio: "", status: "", statusTime: 0 };
+loadMain();
+});
+}
+});
+}
+
+function logout() {
+localStorage.removeItem("username");
+currentUserData = null;
+showPage("authPage");
+}
+
+function loadMain() {
+showPage("mainPage");
+}
+
+function loadStories() {
+document.getElementById("storyList").innerHTML = "";
+db.collection("stories").orderBy("time", "desc").get().then(function(snap) {
+snap.forEach(function(doc) {
+var d = doc.data();
+var div = document.createElement("div");
+div.className = "story-box";
+div.innerHTML = "<b>" + d.title + "</b> <br> " + d.tag1 + " " + d.tag2 + " " + d.tag3 + " " + d.tag4;
+div.onclick = function() { openStory(doc.id); };
+document.getElementById("storyList").appendChild(div);
+});
+});
+}
+
+function postStory() {
+var title = document.getElementById("storyTitle").value;
+var text = document.getElementById("storyText").value;
+var tag1 = document.getElementById("tag1").value;
+var tag2 = document.getElementById("tag2").value;
+var tag3 = document.getElementById("tag3").value;
+var tag4 = document.getElementById("tag4").value;
+var font = document.getElementById("storyFont").value;
+var length = document.getElementById("pageLength").value;
+var bg = document.getElementById("storyBg").value;
+var txt = document.getElementById("storyTxt").value;
+
+if (!title || !text) {
+alert("Fill out fields");
+return;
+}
+
+db.collection("stories").add({
+title: title,
+text: text,
+tag1: tag1,
+tag2: tag2,
+tag3: tag3,
+tag4: tag4,
+font: font,
+length: length,
+bg: bg,
+txt: txt,
+authorId: localStorage.username,
+authorName: localStorage.username,
+time: Date.now()
+}).then(function() {
+document.getElementById("storyTitle").value = "";
+document.getElementById("storyText").value = "";
+showPage("mainPage");
+});
+}
+
+function openStory(id) {
+currentStoryId = id;
+showPage("readPage");
+db.collection("stories").doc(id).get().then(function(doc) {
+var d = doc.data();
+var box = document.getElementById("readContent");
+box.style.fontFamily = d.font;
+box.style.backgroundColor = d.bg;
+box.style.color = d.txt;
+box.style.height = d.length + "px";
+box.style.overflow = "auto";
+box.style.padding = "10px";
+box.innerHTML = "<h3>" + d.title + "</h3><p>" + d.text.replace(/\n/g, "<br>") + "</p><small>By " + d.authorName + "</small>";
+loadRating();
+loadComments();
+});
+}
+
+function loadRating() {
+var box = document.getElementById("ratingBox");
+box.innerHTML = "";
+db.collection("stories").doc(currentStoryId).collection("ratings").doc(localStorage.username).get().then(function(doc) {
+var currentRating = 0;
+if (doc.exists) {
+currentRating = doc.data().stars;
+}
+for (var i = 1; i <= 5; i++) {
+var btn = document.createElement("button");
+btn.innerText = i;
+if (i === currentRating) {
+btn.style.backgroundColor = "black";
+btn.style.color = "white";
+}
+btn.onclick = (function(star) {
+return function() { rateStory(star); };
+})(i);
+box.appendChild(btn);
+}
+});
+}
+
+function rateStory(star) {
+db.collection("stories").doc(currentStoryId).collection("ratings").doc(localStorage.username).set({
+stars: star
+});
+loadRating();
+}
+
+function skipRating() {
+document.getElementById("ratingBox").innerHTML = "<small>Skipped</small>";
+}
+
+function postComment() {
+var text = document.getElementById("commentInput").value;
+if (!text) return;
+db.collection("stories").doc(currentStoryId).collection("comments").add({
+text: text,
+author: localStorage.username,
+time: Date.now()
+}).then(function() {
+document.getElementById("commentInput").value = "";
+loadComments();
+});
+}
+
+function loadComments() {
+document.getElementById("commentList").innerHTML = "";
+db.collection("stories").doc(currentStoryId).collection("comments").orderBy("time", "desc").get().then(function(snap) {
+snap.forEach(function(doc) {
+var d = doc.data();
+var p = document.createElement("p");
+p.innerText = d.author + ": " + d.text;
+document.getElementById("commentList").appendChild(p);
+});
+});
+}
+
+function loadProfile() {
+if (!currentUserData) return;
+document.getElementById("pfpUrl").value = currentUserData.pfp || "";
+document.getElementById("profileBg").value = currentUserData.profileBg || "#ffffff";
+document.getElementById("bannerUrl").value = currentUserData.banner || "";
+document.getElementById("bioText").value = currentUserData.bio || "";
+document.getElementById("statusText").value = "";
+renderProfileView();
+}
+
+function renderProfileView() {
+var box = document.getElementById("profileDisplay");
+box.style.backgroundColor = currentUserData.profileBg;
+box.style.padding = "10px";
+box.style.border = "1px solid black";
+box.style.marginTop = "20px";
+
+var statusHtml = "";
+if (currentUserData.status && currentUserData.statusTime) {
+if (Date.now() - currentUserData.statusTime < 3600000) {
+statusHtml = "<br><small><i>Status: " + currentUserData.status + "</i></small>";
+} else {
+db.collection("users").doc(localStorage.username).update({
+status: "",
+statusTime: 0
+});
+currentUserData.status = "";
+}
+}
+
+box.innerHTML = "<img src='" + (currentUserData.banner || "") + "' style='width:100%;height:50px;object-fit:cover;' onerror='this.style.display=\"none\"'>" +
+"<img src='" + (currentUserData.pfp || "") + "' style='width:50px;height:50px;' onerror='this.style.display=\"none\"'>" +
+"<br><b>" + currentUserData.username + " (" + currentUserData.role + ")</b>" +
+statusHtml +
+"<br><small>" + (currentUserData.bio || "") + "</small>";
+}
+
+function saveProfile() {
+var pfp = document.getElementById("pfpUrl").value;
+var bg = document.getElementById("profileBg").value;
+var banner = document.getElementById("bannerUrl").value;
+var bio = document.getElementById("bioText").value;
+var status = document.getElementById("statusText").value;
+
+var updates = {
+pfp: pfp,
+profileBg: bg,
+banner: banner,
+bio: bio
+};
+
+if (status) {
+updates.status = status;
+updates.statusTime = Date.now();
+}
+
+db.collection("users").doc(localStorage.username).update(updates).then(function() {
+currentUserData.pfp = pfp;
+currentUserData.profileBg = bg;
+currentUserData.banner = banner;
+currentUserData.bio = bio;
+if (status) {
+currentUserData.status = status;
+currentUserData.statusTime = updates.statusTime;
+}
+renderProfileView();
+alert("Saved");
+});
+}
+
+function deleteStatus() {
+db.collection("users").doc(localStorage.username).update({
+status: "",
+statusTime: 0
+}).then(function() {
+currentUserData.status = "";
+currentUserData.statusTime = 0;
+renderProfileView();
+});
+}
 </script>
 </body>
 </html>
