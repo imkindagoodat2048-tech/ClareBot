@@ -64,7 +64,7 @@ cursor: pointer;
 <button onclick="showPage('mainPage')">Back</button>
 <h4>Make Creepy Story</h4>
 <input type="text" id="storyTitle" placeholder="Title">
-<textarea id="storyText" rows="10" placeholder="Story text (press enter twice for a new page)"></textarea>
+<textarea id="storyText" rows="10" placeholder="Story text"></textarea>
 
 <select id="tag1">
 <option value="">Horror Level</option>
@@ -113,6 +113,7 @@ cursor: pointer;
 <option value="courier new">Courier New</option>
 </select>
 
+<input type="number" id="wordsPerPage" placeholder="Words per page" value="200">
 <input type="color" id="storyBg" value="#ffffff">
 <input type="color" id="storyTxt" value="#000000">
 
@@ -303,6 +304,7 @@ var tag2 = document.getElementById("tag2").value;
 var tag3 = document.getElementById("tag3").value;
 var tag4 = document.getElementById("tag4").value;
 var font = document.getElementById("storyFont").value;
+var wpp = parseInt(document.getElementById("wordsPerPage").value) || 200;
 var bg = document.getElementById("storyBg").value;
 var txt = document.getElementById("storyTxt").value;
 
@@ -319,6 +321,7 @@ tag2: tag2,
 tag3: tag3,
 tag4: tag4,
 font: font,
+wordsPerPage: wpp,
 bg: bg,
 txt: txt,
 authorId: localStorage.username,
@@ -338,9 +341,15 @@ currentStoryId = id;
 showPage("readPage");
 db.ref("stories/" + id).once("value").then(function(snapshot) {
 var d = snapshot.val();
-storyPages = d.text.split("\n\n").filter(function(p) { return p.trim() !== ""; });
+var wpp = d.wordsPerPage || 200;
+var words = d.text.split(/\s+/);
+storyPages = [];
+for (var i = 0; i < words.length; i += wpp) {
+var chunk = words.slice(i, i + wpp).join(" ");
+storyPages.push(chunk);
+}
 if (storyPages.length === 0) {
-storyPages = [d.text];
+storyPages = [" "];
 }
 currentPage = 0;
 var box = document.getElementById("readContent");
