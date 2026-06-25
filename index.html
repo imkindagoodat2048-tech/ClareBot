@@ -3,7 +3,7 @@
 <head>
 <title>CreepyStories</title>
 <script src="https://www.gstatic.com/firebasejs/10.7.1/firebase-app-compat.js"></script>
-<script src="https://www.gstatic.com/firebasejs/10.7.1/firebase-firestore-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.7.1/firebase-database-compat.js"></script>
 <style>
 body {
 font-family: arial;
@@ -37,8 +37,8 @@ cursor: pointer;
 </style>
 </head>
 <body>
-
-<h3>Where u can make YOUR Scary Stores!</h3>
+<!-- dont change this i thought it was funny -->
+<h3>Where u can make YOUR Scary Stores!</h3> 
 
 <div id="authPage" class="page" style="display:block;">
 <h4>Login</h4>
@@ -157,15 +157,15 @@ measurementId: "G-QDL915B8JY"
 };
 
 firebase.initializeApp(firebaseConfig);
-const db = firebase.firestore();
+const db = firebase.database();
 
 var currentUserData = null;
 var currentStoryId = null;
 
 if (localStorage.username) {
-db.collection("users").doc(localStorage.username).get().then(function(doc) {
-if (doc.exists) {
-currentUserData = doc.data();
+db.ref("users/" + localStorage.username).once("value").then(function(snapshot) {
+if (snapshot.exists()) {
+currentUserData = snapshot.val();
 loadMain();
 } else {
 localStorage.removeItem("username");
@@ -190,10 +190,10 @@ loadProfile();
 function login() {
 var username = document.getElementById("nameIn").value;
 var password = document.getElementById("passIn").value;
-db.collection("users").doc(username).get().then(function(doc) {
-if (doc.exists && doc.data().pass === btoa(password)) {
+db.ref("users/" + username).once("value").then(function(snapshot) {
+if (snapshot.exists() && snapshot.val().pass === btoa(password)) {
 localStorage.username = username;
-currentUserData = doc.data();
+currentUserData = snapshot.val();
 loadMain();
 } else {
 alert("wrong name or pass");
@@ -213,15 +213,15 @@ if (!password) {
 alert("need password");
 return;
 }
-db.collection("users").doc(username).get().then(function(doc) {
-if (doc.exists) {
+db.ref("users/" + username).once("value").then(function(snapshot) {
+if (snapshot.exists()) {
 alert("name taken");
 } else {
 var role = "user";
 if (username === "bartelsfamily5") {
 role = "admin";
 }
-db.collection("users").doc(username).set({
+var userData = {
 username: username,
 role: role,
 pass: btoa(password),
@@ -231,9 +231,10 @@ banner: "",
 bio: "",
 status: "",
 statusTime: 0
-}).then(function() {
+};
+db.ref("users/" + username).set(userData).then(function() {
 localStorage.username = username;
-currentUserData = { username: username, role: role, pass: btoa(password), pfp: "", profileBg: "#ffffff", banner: "", bio: "", status: "", statusTime: 0 };
+currentUserData = userData;
 loadMain();
 });
 }
@@ -252,15 +253,22 @@ showPage("mainPage");
 
 function loadStories() {
 document.getElementById("storyList").innerHTML = "";
-db.collection("stories").orderBy("time", "desc").get().then(function(snap) {
-snap.forEach(function(doc) {
-var d = doc.data();
+db.ref("stories").once("value").then(function(snapshot) {
+var stories = [];
+snapshot.forEach(function(child) {
+stories.push({ id: child.key, data: child.val() });
+});
+stories.reverse();
+for (var i = 0; i < stories.length; i++) {
+var d = stories[i].data;
 var div = document.createElement("div");
 div.className = "story-box";
 div.innerHTML = "<b>" + d.title + "</b> <br> " + d.tag1 + " " + d.tag2 + " " + d.tag3 + " " + d.tag4;
-div.onclick = function() { openStory(doc.id); };
+div.onclick = (function(storyId) {
+return function() { openStory(storyId); };
+})(stories[i].id);
 document.getElementById("storyList").appendChild(div);
-});
+}
 });
 }
 
@@ -281,7 +289,7 @@ alert("Fill out fields");
 return;
 }
 
-db.collection("stories").add({
+var storyData = {
 title: title,
 text: text,
 tag1: tag1,
@@ -295,7 +303,9 @@ txt: txt,
 authorId: localStorage.username,
 authorName: localStorage.username,
 time: Date.now()
-}).then(function() {
+};
+
+db.ref("stories").push().set(storyData).then(function() {
 document.getElementById("storyTitle").value = "";
 document.getElementById("storyText").value = "";
 showPage("mainPage");
@@ -305,8 +315,8 @@ showPage("mainPage");
 function openStory(id) {
 currentStoryId = id;
 showPage("readPage");
-db.collection("stories").doc(id).get().then(function(doc) {
-var d = doc.data();
+db.ref("stories/" + id).once("value").then(function(snapshot) {
+var d = snapshot.val();
 var box = document.getElementById("readContent");
 box.style.fontFamily = d.font;
 box.style.backgroundColor = d.bg;
@@ -323,10 +333,10 @@ loadComments();
 function loadRating() {
 var box = document.getElementById("ratingBox");
 box.innerHTML = "";
-db.collection("stories").doc(currentStoryId).collection("ratings").doc(localStorage.username).get().then(function(doc) {
+db.ref("stories/" + currentStoryId + "/ratings/" + localStorage.username).once("value").then(function(snapshot) {
 var currentRating = 0;
-if (doc.exists) {
-currentRating = doc.data().stars;
+if (snapshot.exists()) {
+currentRating = snapshot.val().stars;
 }
 for (var i = 1; i <= 5; i++) {
 var btn = document.createElement("button");
@@ -344,7 +354,7 @@ box.appendChild(btn);
 }
 
 function rateStory(star) {
-db.collection("stories").doc(currentStoryId).collection("ratings").doc(localStorage.username).set({
+db.ref("stories/" + currentStoryId + "/ratings/" + localStorage.username).set({
 stars: star
 });
 loadRating();
@@ -357,7 +367,7 @@ document.getElementById("ratingBox").innerHTML = "<small>Skipped</small>";
 function postComment() {
 var text = document.getElementById("commentInput").value;
 if (!text) return;
-db.collection("stories").doc(currentStoryId).collection("comments").add({
+db.ref("stories/" + currentStoryId + "/comments").push().set({
 text: text,
 author: localStorage.username,
 time: Date.now()
@@ -369,13 +379,18 @@ loadComments();
 
 function loadComments() {
 document.getElementById("commentList").innerHTML = "";
-db.collection("stories").doc(currentStoryId).collection("comments").orderBy("time", "desc").get().then(function(snap) {
-snap.forEach(function(doc) {
-var d = doc.data();
+db.ref("stories/" + currentStoryId + "/comments").once("value").then(function(snapshot) {
+var comments = [];
+snapshot.forEach(function(child) {
+comments.push(child.val());
+});
+comments.reverse();
+for (var i = 0; i < comments.length; i++) {
+var d = comments[i];
 var p = document.createElement("p");
 p.innerText = d.author + ": " + d.text;
 document.getElementById("commentList").appendChild(p);
-});
+}
 });
 }
 
@@ -401,7 +416,7 @@ if (currentUserData.status && currentUserData.statusTime) {
 if (Date.now() - currentUserData.statusTime < 3600000) {
 statusHtml = "<br><small><i>Status: " + currentUserData.status + "</i></small>";
 } else {
-db.collection("users").doc(localStorage.username).update({
+db.ref("users/" + localStorage.username).update({
 status: "",
 statusTime: 0
 });
@@ -435,7 +450,7 @@ updates.status = status;
 updates.statusTime = Date.now();
 }
 
-db.collection("users").doc(localStorage.username).update(updates).then(function() {
+db.ref("users/" + localStorage.username).update(updates).then(function() {
 currentUserData.pfp = pfp;
 currentUserData.profileBg = bg;
 currentUserData.banner = banner;
@@ -450,7 +465,7 @@ alert("Saved");
 }
 
 function deleteStatus() {
-db.collection("users").doc(localStorage.username).update({
+db.ref("users/" + localStorage.username).update({
 status: "",
 statusTime: 0
 }).then(function() {
