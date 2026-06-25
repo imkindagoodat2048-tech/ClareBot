@@ -37,8 +37,8 @@ cursor: pointer;
 </style>
 </head>
 <body>
-<!-- dont change this i thought it was funny -->
-<h3>Where u can make YOUR Scary Stores!</h3> 
+
+<h3>Where u can make YOUR Scary Stores!</h3>
 
 <div id="authPage" class="page" style="display:block;">
 <h4>Login</h4>
@@ -64,7 +64,7 @@ cursor: pointer;
 <button onclick="showPage('mainPage')">Back</button>
 <h4>Make Creepy Story</h4>
 <input type="text" id="storyTitle" placeholder="Title">
-<textarea id="storyText" rows="10" placeholder="Story text"></textarea>
+<textarea id="storyText" rows="10" placeholder="Story text (press enter twice for a new page)"></textarea>
 
 <select id="tag1">
 <option value="">Horror Level</option>
@@ -113,7 +113,6 @@ cursor: pointer;
 <option value="courier new">Courier New</option>
 </select>
 
-<input type="number" id="pageLength" placeholder="Page Height (px)" value="400">
 <input type="color" id="storyBg" value="#ffffff">
 <input type="color" id="storyTxt" value="#000000">
 
@@ -122,7 +121,12 @@ cursor: pointer;
 
 <div id="readPage" class="page">
 <button onclick="showPage('mainPage')">Back</button>
-<div id="readContent"></div>
+<div id="readContent" style="padding:10px;min-height:200px;"></div>
+<div id="pageControls" style="margin-bottom:20px;">
+<button onclick="prevPage()">Prev</button>
+<span id="pageNum"></span>
+<button onclick="nextPage()">Next</button>
+</div>
 <h4>Rate</h4>
 <div id="ratingBox"></div>
 <button onclick="skipRating()">Skip</button>
@@ -145,6 +149,11 @@ cursor: pointer;
 <div id="profileDisplay"></div>
 </div>
 
+<div id="userPage" class="page">
+<button onclick="showPage('mainPage')">Back</button>
+<div id="userDisplay" style="padding:10px;border:1px solid black;margin-top:20px;"></div>
+</div>
+
 <script>
 const firebaseConfig = {
 apiKey: "AIzaSyB111TO8XYZ2TGbNfwDcHw7GIVmziORwcI",
@@ -161,6 +170,8 @@ const db = firebase.database();
 
 var currentUserData = null;
 var currentStoryId = null;
+var storyPages = [];
+var currentPage = 0;
 
 if (localStorage.username) {
 db.ref("users/" + localStorage.username).once("value").then(function(snapshot) {
@@ -261,15 +272,27 @@ stories.push({ id: child.key, data: child.val() });
 stories.reverse();
 for (var i = 0; i < stories.length; i++) {
 var d = stories[i].data;
+var id = stories[i].id;
 var div = document.createElement("div");
 div.className = "story-box";
-div.innerHTML = "<b>" + d.title + "</b> <br> " + d.tag1 + " " + d.tag2 + " " + d.tag3 + " " + d.tag4;
+var adminBtn = "";
+if (currentUserData.role === "admin" || d.authorId === localStorage.username) {
+adminBtn = " <button onclick=\"event.stopPropagation(); deleteStory('" + id + "')\">Delete Story</button>";
+}
+div.innerHTML = "<b>" + d.title + "</b> <br> " + d.tag1 + " " + d.tag2 + " " + d.tag3 + " " + d.tag4 + "<br><small>By <span style='cursor:pointer;text-decoration:underline;' onclick=\"event.stopPropagation(); viewProfile('" + d.authorId + "')\">" + d.authorName + "</span></small>" + adminBtn;
 div.onclick = (function(storyId) {
 return function() { openStory(storyId); };
-})(stories[i].id);
+})(id);
 document.getElementById("storyList").appendChild(div);
 }
 });
+}
+
+function deleteStory(id) {
+if (confirm("delete?")) {
+db.ref("stories/" + id).remove();
+loadStories();
+}
 }
 
 function postStory() {
@@ -280,7 +303,6 @@ var tag2 = document.getElementById("tag2").value;
 var tag3 = document.getElementById("tag3").value;
 var tag4 = document.getElementById("tag4").value;
 var font = document.getElementById("storyFont").value;
-var length = document.getElementById("pageLength").value;
 var bg = document.getElementById("storyBg").value;
 var txt = document.getElementById("storyTxt").value;
 
@@ -297,7 +319,6 @@ tag2: tag2,
 tag3: tag3,
 tag4: tag4,
 font: font,
-length: length,
 bg: bg,
 txt: txt,
 authorId: localStorage.username,
@@ -317,17 +338,38 @@ currentStoryId = id;
 showPage("readPage");
 db.ref("stories/" + id).once("value").then(function(snapshot) {
 var d = snapshot.val();
+storyPages = d.text.split("\n\n").filter(function(p) { return p.trim() !== ""; });
+if (storyPages.length === 0) {
+storyPages = [d.text];
+}
+currentPage = 0;
 var box = document.getElementById("readContent");
 box.style.fontFamily = d.font;
 box.style.backgroundColor = d.bg;
 box.style.color = d.txt;
-box.style.height = d.length + "px";
-box.style.overflow = "auto";
-box.style.padding = "10px";
-box.innerHTML = "<h3>" + d.title + "</h3><p>" + d.text.replace(/\n/g, "<br>") + "</p><small>By " + d.authorName + "</small>";
+renderPage();
 loadRating();
 loadComments();
 });
+}
+
+function renderPage() {
+document.getElementById("readContent").innerHTML = storyPages[currentPage].replace(/\n/g, "<br>");
+document.getElementById("pageNum").innerText = "Page " + (currentPage + 1) + " of " + storyPages.length;
+}
+
+function nextPage() {
+if (currentPage < storyPages.length - 1) {
+currentPage++;
+renderPage();
+}
+}
+
+function prevPage() {
+if (currentPage > 0) {
+currentPage--;
+renderPage();
+}
 }
 
 function loadRating() {
@@ -382,15 +424,47 @@ document.getElementById("commentList").innerHTML = "";
 db.ref("stories/" + currentStoryId + "/comments").once("value").then(function(snapshot) {
 var comments = [];
 snapshot.forEach(function(child) {
-comments.push(child.val());
+comments.push({ id: child.key, data: child.val() });
 });
 comments.reverse();
 for (var i = 0; i < comments.length; i++) {
-var d = comments[i];
+var d = comments[i].data;
+var id = comments[i].id;
 var p = document.createElement("p");
-p.innerText = d.author + ": " + d.text;
+var adminBtn = "";
+if (currentUserData.role === "admin" || d.author === localStorage.username) {
+adminBtn = " <button onclick=\"deleteComment('" + id + "')\">Delete</button>";
+}
+p.innerHTML = "<span style='cursor:pointer;text-decoration:underline;' onclick=\"viewProfile('" + d.author + "')\">" + d.author + "</span>: " + d.text + adminBtn;
 document.getElementById("commentList").appendChild(p);
 }
+});
+}
+
+function deleteComment(id) {
+db.ref("stories/" + currentStoryId + "/comments/" + id).remove();
+loadComments();
+}
+
+function viewProfile(username) {
+showPage("userPage");
+db.ref("users/" + username).once("value").then(function(snapshot) {
+var u = snapshot.val();
+var box = document.getElementById("userDisplay");
+box.style.backgroundColor = u.profileBg || "#ffffff";
+
+var statusHtml = "";
+if (u.status && u.statusTime) {
+if (Date.now() - u.statusTime < 3600000) {
+statusHtml = "<br><small><i>Status: " + u.status + "</i></small>";
+}
+}
+
+box.innerHTML = "<img src='" + (u.banner || "") + "' style='width:100%;height:50px;object-fit:cover;' onerror='this.style.display=\"none\"'>" +
+"<img src='" + (u.pfp || "") + "' style='width:50px;height:50px;' onerror='this.style.display=\"none\"'>" +
+"<br><b>" + u.username + " (" + u.role + ")</b>" +
+statusHtml +
+"<br><small>" + (u.bio || "") + "</small>";
 });
 }
 
